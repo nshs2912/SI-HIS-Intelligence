@@ -18,8 +18,11 @@ def _fmt_number(v,digits=4):
     if isinstance(v,(float,np.floating)):return f'{float(v):.{digits}f}'
     return str(v)
 
+def show_resume(text,detail='tabel'):
+    st.info(text or 'Belum tersedia interpretasi untuk scope/data ini.')
+    st.caption(f"Untuk lebih detail bisa dilihat pada {detail} di bawah ini.")
+
 def render_value(value,title=None):
-    """Render structured analytics without JSON/string dumps of DataFrames."""
     if title:st.markdown(f'#### {title}')
     if isinstance(value,pd.DataFrame):
         if value.empty:st.info('Belum ada data untuk ditampilkan.')
@@ -50,26 +53,24 @@ def risk_summary(risk):
     rows=[]
     for var,obj in risk.items():
         if var.startswith('MULTIVARIAT') or not isinstance(obj,dict):continue
-        p=obj.get('p_value'); valid=p is not None and pd.notna(p); sig=bool(valid and float(p)<.05)
+        p=obj.get('p_value');valid=p is not None and pd.notna(p);sig=bool(valid and float(p)<.05)
         rows.append({'Faktor':var,'p-value':round(float(p),4) if valid else None,'Interpretasi':'Ada asosiasi statistik (p<0,05)' if sig else ('Tidak ada bukti asosiasi statistik pada α=0,05' if valid else 'Uji tidak dapat dihitung')})
     return pd.DataFrame(rows)
 
 def risk_narrative(risk):
     s=risk_summary(risk)
-    if s.empty:return 'Belum ada faktor yang dapat dievaluasi. Hasil analisis bivariat dan multivariat selengkapnya bisa dilihat di bawah ini.'
+    if s.empty:return 'Belum ada faktor yang dapat dievaluasi.'
     sig=s[s['p-value'].notna() & (s['p-value']<.05)]
-    if sig.empty:return 'Pada data dan outcome yang dianalisis, belum ditemukan faktor dengan asosiasi statistik pada ambang p<0,05. Hal ini tidak membuktikan tidak adanya faktor risiko. Interpretasi harus mempertimbangkan OR, interval kepercayaan, ukuran sampel, confounding, bias, dan definisi outcome. Hasil analisis bivariat dan multivariat selengkapnya bisa dilihat di bawah ini.'
-    return f"Ditemukan sinyal asosiasi statistik pada **{', '.join(sig['Faktor'].astype(str))}**. Ini adalah asosiasi pada dataset, bukan bukti kausal. Periksa OR/CI 95% dan model multivariat untuk menilai apakah asosiasi bertahan setelah penyesuaian. Hasil analisis bivariat dan multivariat selengkapnya bisa dilihat di bawah ini."
+    if sig.empty:return 'Pada data dan outcome yang dianalisis, belum ditemukan faktor dengan asosiasi statistik pada ambang p<0,05. Hal ini tidak membuktikan tidak adanya faktor risiko. Interpretasi harus mempertimbangkan OR, interval kepercayaan, ukuran sampel, confounding, bias, dan definisi outcome.'
+    return f"Ditemukan sinyal asosiasi statistik pada **{', '.join(sig['Faktor'].astype(str))}**. Ini adalah asosiasi pada dataset, bukan bukti kausal. OR/CI 95% dan model multivariat perlu dibaca untuk menilai besar, arah, dan kestabilan asosiasi setelah penyesuaian."
 
 def render_risk_factors(risk):
     if not isinstance(risk,dict):render_value(risk);return
     for factor,obj in risk.items():
         st.markdown(f'#### {factor}')
-        if isinstance(obj,pd.DataFrame):
-            render_value(obj);continue
+        if isinstance(obj,pd.DataFrame):render_value(obj);continue
         if not isinstance(obj,dict):st.write(obj);continue
-        p=obj.get('p_value'); chi=obj.get('chi2')
-        c1,c2=st.columns(2); c1.metric('Chi-square',_fmt_number(chi)); c2.metric('p-value',_fmt_number(p))
+        p=obj.get('p_value');chi=obj.get('chi2');c1,c2=st.columns(2);c1.metric('Chi-square',_fmt_number(chi));c2.metric('p-value',_fmt_number(p))
         if p is not None and pd.notna(p):
             if float(p)<.05:st.info('Terdapat asosiasi statistik pada α=0,05. Besar dan arah asosiasi tetap harus dinilai dari OR dan CI 95%.')
             else:st.info('Belum terdapat bukti asosiasi statistik pada α=0,05. Ini bukan bukti bahwa faktor tersebut tidak berpengaruh.')
@@ -78,6 +79,16 @@ def render_risk_factors(risk):
         if isinstance(ct,pd.DataFrame):st.markdown('**Tabel silang**');st.dataframe(ct,use_container_width=True)
         ors=obj.get('or_by_group')
         if isinstance(ors,pd.DataFrame) and not ors.empty:st.markdown('**Odds Ratio menurut kelompok**');st.dataframe(ors,use_container_width=True,hide_index=True)
+
+def descriptive_narrative(result,label):
+    ov=result.get('overview',{}) if isinstance(result,dict) else {};total=int(ov.get('total_cases',0) or 0);deaths=int(ov.get('deaths',0) or 0);parts=[f'Scope **{label}** mencakup **{total:,} kasus/kunjungan** dengan **{deaths:,} kasus meninggal**.']
+    top=result.get('top10_diseases') if isinstance(result,dict) else None
+    if isinstance(top,pd.DataFrame) and not top.empty:
+        r=top.iloc[0];parts.append(f"Penyakit dengan jumlah kasus terbesar adalah **{r.get('Nama Penyakit','-')}**, sebanyak **{int(r.get('Jumlah Kasus',0)):,} kasus** dengan CFR **{float(r.get('CFR',0)):.2f}%**.")
+    if isinstance(result.get('province_distribution'),pd.DataFrame) and not result['province_distribution'].empty:
+        p=result['province_distribution'].iloc[0];parts.append(f"Distribusi wilayah menunjukkan konsentrasi kasus terbesar pada **{p.get('Provinsi','-')}** sebanyak **{int(p.get('Jumlah Kasus',0)):,} kasus**.")
+    parts.append('Temuan ini bersifat deskriptif; interpretasi risiko membutuhkan denominator populasi, definisi outcome, dan analisis epidemiologis lanjutan yang sesuai.')
+    return ' '.join(parts)
 
 def ews_narrative(ews,rt):
     if not isinstance(ews,dict):return 'Data temporal belum cukup untuk membentuk Early Warning Score.'
@@ -89,7 +100,7 @@ def ews_narrative(ews,rt):
 
 def spatial_narrative(spatial):
     if not isinstance(spatial,pd.DataFrame) or spatial.empty:return 'Belum terdapat cukup koordinat untuk analisis kepadatan spasial.'
-    counts=spatial['Cluster'].value_counts() if 'Cluster' in spatial else pd.Series(dtype=int);clusters=counts.drop(index=-1,errors='ignore');noise=int(counts.get(-1,0));return f"**DBSCAN** menemukan **{len(clusters)} cluster** dan **{noise} titik noise/outlier**. DBSCAN dipilih karena tidak memerlukan jumlah cluster di awal, mampu mengenali cluster geografis tidak beraturan dan memisahkan noise. K-Means memerlukan nilai K dan berorientasi centroid, sehingga kurang natural untuk deteksi hotspot epidemiologis. Cluster bukan otomatis episentrum penularan; interpretasi harus dikaitkan dengan TIME, paparan, populasi berisiko dan investigasi lapangan."
+    counts=spatial['Cluster'].value_counts() if 'Cluster' in spatial else pd.Series(dtype=int);clusters=counts.drop(index=-1,errors='ignore');noise=int(counts.get(-1,0));return f"**DBSCAN** menemukan **{len(clusters)} cluster** dan **{noise} titik noise/outlier**. Cluster bukan otomatis episentrum penularan; interpretasi harus dikaitkan dengan TIME, paparan, populasi berisiko dan investigasi lapangan."
 
 def curve_narrative(curve,disease):
     if not isinstance(curve,(tuple,list)) or len(curve)<4:return 'Klasifikasi kurva belum tersedia.'
@@ -98,7 +109,7 @@ def curve_narrative(curve,disease):
 def forecast_render(fc):
     if not isinstance(fc,dict):render_value(fc);return
     table=pd.DataFrame({'Tanggal':pd.to_datetime(fc.get('dates',[]),errors='coerce'),'Forecast':fc.get('forecast',[]),'Lower 95%':fc.get('lower',[]),'Upper 95%':fc.get('upper',[])})
-    st.info(f"Model **{fc.get('model','Holt-Winters')}** memperkirakan tren **{fc.get('trend','-')}**. Forecast adalah estimasi model dan intervalnya menunjukkan ketidakpastian, bukan jumlah kasus yang pasti terjadi.")
+    show_resume(f"Model **{fc.get('model','Holt-Winters')}** memperkirakan tren **{fc.get('trend','-')}**. Forecast adalah estimasi model dan intervalnya menunjukkan ketidakpastian, bukan jumlah kasus yang pasti terjadi.")
     if not table.empty:st.line_chart(table.set_index('Tanggal')[['Forecast','Lower 95%','Upper 95%']]);st.dataframe(table,use_container_width=True,hide_index=True)
 
 def vulnerable_narrative(v):
@@ -128,38 +139,38 @@ with st.sidebar.expander('Drill-down wilayah (opsional)'):
     kecs=sorted(dfk['Kecamatan'].dropna().astype(str).unique()) if 'Kecamatan' in dfk else [];sel_kec=st.selectbox('Kecamatan',['Semua Kecamatan']+kecs);dbase=dfk if sel_kec=='Semua Kecamatan' else dfk[dfk['Kecamatan'].astype(str).eq(sel_kec)];villages=sorted(dbase['Desa/Kelurahan'].dropna().astype(str).unique()) if 'Desa/Kelurahan' in dbase else [];sel_desa=st.selectbox('Desa/Kelurahan',['Semua Desa/Kelurahan']+villages);vbase=dbase if sel_desa=='Semua Desa/Kelurahan' else dbase[dbase['Desa/Kelurahan'].astype(str).eq(sel_desa)];pusk=sorted(vbase['Puskesmas'].dropna().astype(str).unique()) if 'Puskesmas' in vbase else [];sel_pusk=st.selectbox('Puskesmas',['Semua Puskesmas']+pusk)
 include_ml=st.sidebar.checkbox('Aktifkan ML layer',False);scope=QueryScope(province=None if sel_prov=='Semua Provinsi' else sel_prov,district=None if sel_kab=='Semua Kabupaten/Kota' else sel_kab,kecamatan=None if sel_kec=='Semua Kecamatan' else sel_kec,village=None if sel_desa=='Semua Desa/Kelurahan' else sel_desa,puskesmas=None if sel_pusk=='Semua Puskesmas' else sel_pusk,disease=None if sel_disease=='Semua Penyakit' else sel_disease,period_days=3650)
 if sel_disease=='Semua Penyakit':
-    result=engine.descriptive(dfk);label=sel_kab if sel_kab!='Semua Kabupaten/Kota' else (sel_prov if sel_prov!='Semua Provinsi' else 'Indonesia');st.markdown(f'## 📊 Analisis Deskriptif — {label}');ov=result['overview'];a,b=st.columns(2);a.metric('Total Kunjungan Pasien',f"{ov['total_cases']:,}");b.metric('Kasus Meninggal',f"{ov['deaths']:,}");st.markdown('### 🏆 10 Besar Penyakit');render_value(result['top10_diseases']);st.markdown('### Distribusi');render_value(result['disease_distribution']);render_value(result['sex_distribution'],'Jenis Kelamin');render_value(result['age_distribution'],'Kelompok Umur');render_value(result['province_distribution'],'Provinsi');render_value(result['district_distribution'].head(50),'Kabupaten/Kota')
+    result=engine.descriptive(dfk);label=sel_kab if sel_kab!='Semua Kabupaten/Kota' else (sel_prov if sel_prov!='Semua Provinsi' else 'Indonesia');st.markdown(f'## 📊 Analisis Deskriptif — {label}');ov=result['overview'];a,b=st.columns(2);a.metric('Total Kunjungan Pasien',f"{ov['total_cases']:,}");b.metric('Kasus Meninggal',f"{ov['deaths']:,}");st.markdown('### Resume Epidemiologi');show_resume(descriptive_narrative(result,label));st.markdown('### 🏆 10 Besar Penyakit');show_resume('Tabel ini menunjukkan penyakit dengan beban kasus terbesar dalam scope yang dipilih. Jumlah kasus menggambarkan beban absolut; CFR menggambarkan proporsi kematian di antara kasus dan tidak boleh ditafsirkan sebagai risiko populasi tanpa denominator yang sesuai.');render_value(result['top10_diseases']);st.markdown('### Distribusi');show_resume('Distribusi berikut memperlihatkan komposisi kasus menurut penyakit, jenis kelamin, kelompok umur, provinsi, dan kabupaten/kota. Perbedaan jumlah kasus adalah temuan deskriptif dan tidak otomatis menunjukkan perbedaan risiko.');render_value(result['disease_distribution']);render_value(result['sex_distribution'],'Jenis Kelamin');render_value(result['age_distribution'],'Kelompok Umur');render_value(result['province_distribution'],'Provinsi');render_value(result['district_distribution'].head(50),'Kabupaten/Kota')
 else:
     result=engine.analyze(df_raw,scope=scope,include_ml=include_ml,mode='epidemiology');label=sel_kab if sel_kab!='Semua Kabupaten/Kota' else (sel_prov if sel_prov!='Semua Provinsi' else 'Indonesia');st.markdown(f'## 🧬 Analisis Epidemiologi — {sel_disease}');st.caption(f'Scope: **{sel_disease} — {label}** | TIME + PERSON + PLACE')
     if not result.get('eligible',False):st.warning('Analisis epidemiologi belum dapat dijalankan.');render_value(result.get('eligibility'));st.stop()
     total=int(result['overview']['total_cases']);mortality=result.get('mortality');deaths=int(mortality.get('deaths',mortality.get('meninggal',0)) or 0) if isinstance(mortality,dict) else 0;cfr=deaths/total*100 if total else 0;a,b,c=st.columns(3);a.metric(f'Total {sel_disease}',f'{total:,}');b.metric('Meninggal',f'{deaths:,}');c.metric('CFR',f'{cfr:.2f}%')
     tabs=st.tabs(['📊 TIME + PERSON + PLACE','🧪 Faktor Risiko','🚨 Early Warning / KLB','🗺️ Spatial / DBSCAN','📈 Kurva Epidemik','👥 Vulnerable Population','🧠 ML'])
     with tabs[0]:
-        tri=result.get('trias_summary',{});st.info(tri.get('narrative','TIME + PERSON + PLACE menjelaskan kapan, siapa dan di mana kasus terjadi.'));top10=tri.get('top10_province') if isinstance(tri,dict) else None
+        tri=result.get('trias_summary',{});show_resume(tri.get('narrative','TIME + PERSON + PLACE menjelaskan kapan, siapa dan di mana kasus terjadi.'));top10=tri.get('top10_province') if isinstance(tri,dict) else None
         if isinstance(top10,pd.DataFrame) and not top10.empty:render_value(top10,'10 Besar Provinsi')
         render_value(result.get('place'),'PLACE');render_value(result.get('person'),'PERSON');t=result.get('time')
-        if isinstance(t,pd.DataFrame) and not t.empty:chart=t.copy();chart['Tanggal Sakit']=pd.to_datetime(chart['Tanggal Sakit'],errors='coerce');st.line_chart(chart.dropna(subset=['Tanggal Sakit']).set_index('Tanggal Sakit')['Jumlah Kasus']);render_value(t,'TIME')
-        render_value(mortality,'MORTALITY / CFR')
+        if isinstance(t,pd.DataFrame) and not t.empty:chart=t.copy();chart['Tanggal Sakit']=pd.to_datetime(chart['Tanggal Sakit'],errors='coerce');st.line_chart(chart.dropna(subset=['Tanggal Sakit']).set_index('Tanggal Sakit')['Jumlah Kasus']);show_resume('Distribusi waktu memperlihatkan kapan kasus terjadi dan membantu mengenali perubahan tren, puncak, atau pola gelombang.');render_value(t,'TIME')
+        show_resume('Distribusi mortalitas dan CFR menjelaskan beban kematian relatif terhadap jumlah kasus yang dianalisis. CFR perlu dibaca bersama ukuran sampel, kelengkapan outcome, dan karakteristik kasus.');render_value(mortality,'MORTALITY / CFR')
     with tabs[1]:
-        st.markdown('### Resume Faktor Risiko');st.info(risk_narrative(result.get('risk_factors')));s=risk_summary(result.get('risk_factors'))
+        st.markdown('### Resume Faktor Risiko');show_resume(risk_narrative(result.get('risk_factors')));s=risk_summary(result.get('risk_factors'))
         if not s.empty:st.dataframe(s,use_container_width=True,hide_index=True)
         st.markdown('### Hasil Analisis Bivariat & Multivariat Selengkapnya');render_risk_factors(result.get('risk_factors'));st.caption('OR, CI 95%, p-value dan adjusted OR harus dibaca bersama desain studi, confounding, bias dan ukuran sampel.')
-    with tabs[2]:st.markdown('### Interpretasi Epidemiologi');st.info(ews_narrative(result.get('ews'),result.get('rt')));render_value(result.get('ews'),'Indikator EWS');render_value(result.get('rt'),'Rₜ')
+    with tabs[2]:st.markdown('### Interpretasi Epidemiologi');show_resume(ews_narrative(result.get('ews'),result.get('rt')));render_value(result.get('ews'),'Indikator EWS');render_value(result.get('rt'),'Rₜ')
     with tabs[3]:
-        st.markdown('### Interpretasi Spatial');st.info(spatial_narrative(result.get('spatial')));spatial=result.get('spatial');render_value(spatial,'Hasil DBSCAN')
+        st.markdown('### Interpretasi Spatial');show_resume(spatial_narrative(result.get('spatial')));spatial=result.get('spatial');render_value(spatial,'Hasil DBSCAN')
         if isinstance(spatial,pd.DataFrame) and not spatial.empty and {'Latitude','Longitude'}.issubset(spatial.columns):
             geo=spatial.dropna(subset=['Latitude','Longitude'])
             if not geo.empty:
                 m=folium.Map(location=[float(geo.Latitude.mean()),float(geo.Longitude.mean())],zoom_start=9)
                 for _,row in geo.head(500).iterrows():folium.CircleMarker([float(row.Latitude),float(row.Longitude)],radius=4,popup=f"{row.get('Desa/Kelurahan','')} | Cluster {row.get('Cluster','')}").add_to(m)
                 st_folium(m,width=None,height=500)
-        render_value(result.get('epicenters'),'Episentrum / Titik Prioritas')
+        show_resume('Episentrum/titik prioritas harus dibaca sebagai lokasi konsentrasi spasial dalam dataset, bukan otomatis sebagai sumber penularan.');render_value(result.get('epicenters'),'Episentrum / Titik Prioritas')
     with tabs[4]:
-        curve=result.get('epidemic_curve_classification');st.markdown('### Interpretasi Kurva Epidemik');st.info(curve_narrative(curve,sel_disease));st.markdown('**Jenis umum:** Point Source, Common Source Continuous, Intermittent Source, Propagated/Multi-Wave, dan Mixed/Unclassified. Interpretasi harus mempertimbangkan masa inkubasi dan mekanisme penyakit.');t=result.get('time')
+        curve=result.get('epidemic_curve_classification');st.markdown('### Interpretasi Kurva Epidemik');show_resume(curve_narrative(curve,sel_disease));st.markdown('**Jenis umum:** Point Source, Common Source Continuous, Intermittent Source, Propagated/Multi-Wave, dan Mixed/Unclassified. Interpretasi harus mempertimbangkan masa inkubasi dan mekanisme penyakit.');t=result.get('time')
         if isinstance(t,pd.DataFrame) and not t.empty:chart=t.copy();chart['Tanggal Sakit']=pd.to_datetime(chart['Tanggal Sakit'],errors='coerce');st.line_chart(chart.dropna(subset=['Tanggal Sakit']).set_index('Tanggal Sakit')['Jumlah Kasus'])
         st.markdown('### Forecast 14 Hari');forecast_render(result.get('forecast'))
-    with tabs[5]:v=result.get('vulnerable');st.markdown('### Interpretasi Vulnerable Population');st.info(vulnerable_narrative(v));render_value(v,'Profil Rentan')
+    with tabs[5]:v=result.get('vulnerable');st.markdown('### Interpretasi Vulnerable Population');show_resume(vulnerable_narrative(v));render_value(v,'Profil Rentan')
     with tabs[6]:
-        if include_ml:st.markdown('### Interpretasi ML');st.info(ml_narrative(result.get('ml')));render_value(result.get('ml'))
-        else:st.info('ML layer tidak diaktifkan.')
+        if include_ml:st.markdown('### Interpretasi ML');show_resume(ml_narrative(result.get('ml')));render_value(result.get('ml'))
+        else:show_resume('ML layer tidak diaktifkan. Analisis epidemiologi non-ML tetap dapat digunakan sesuai kecukupan data.')
 st.caption('SI-HIS Intelligence — epidemiological decision-support with TIME + PERSON + PLACE.')

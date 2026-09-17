@@ -2,7 +2,8 @@
 
 The engine separates descriptive analysis from disease-scoped epidemiology and
 keeps each outcome independent: disease occurrence, severity and mortality are
-modeled as separate dependent variables.
+modeled as separate dependent variables. KLB early warning uses a versioned
+regulatory surveillance ruleset and never declares legal KLB status itself.
 """
 from __future__ import annotations
 from dataclasses import dataclass
@@ -17,7 +18,7 @@ from .ml_engine import train_case_severity, train_klb_prediction, train_spatial_
 from .scope import QueryScope, apply_scope, scope_label
 from .spatial import compute_epicenter, analyze_spatial
 from .statistics import hitung_bivariat_lengkap
-from .surveillance import early_warning
+from .surveillance import early_warning, evaluate_klb
 
 @dataclass(frozen=True)
 class IntelligenceResult:
@@ -116,8 +117,7 @@ def _severity_outcome(df):
 def _outcome_analysis(cohort,target,name,question):
     if target is None:return {"available":False,"outcome":name,"question":question,"status":"Outcome belum tersedia/terdefinisi pada dataset."}
     work=cohort.copy();work["_Outcome"]=pd.to_numeric(target,errors="coerce");valid=work["_Outcome"].isin([0,1]);work=work.loc[valid].copy()
-    if len(work)<30 or work["_Outcome"].nunique()<2:
-        return {"available":False,"outcome":name,"question":question,"status":f"Outcome {name} belum memenuhi kecukupan data untuk model (minimal 30 observasi lengkap dan dua kategori outcome).","n":len(work)}
+    if len(work)<30 or work["_Outcome"].nunique()<2:return {"available":False,"outcome":name,"question":question,"status":f"Outcome {name} belum memenuhi kecukupan data untuk model (minimal 30 observasi lengkap dan dua kategori outcome).","n":len(work)}
     result=hitung_bivariat_lengkap(work,var_dep_binary="_Outcome")
     return {"available":True,"outcome":name,"question":question,"n":len(work),"events":int(work["_Outcome"].sum()),"event_rate_pct":round(float(work["_Outcome"].mean()*100),2),"analysis":result}
 
@@ -139,8 +139,7 @@ class IntelligenceEngine:
     def analyze(self,df,scope=None,forecast_days=14,include_ml=False,mode="epidemiology"):
         if mode=="descriptive":return self.descriptive(df)
         prepared=self.prepare(df,scope);scoped=_apply_period(prepared.dataframe,prepared.scope.period_days);disease=prepared.scope.disease
-        if not disease or disease=="Semua Penyakit":
-            return self.descriptive(prepared.dataframe)
+        if not disease or disease=="Semua Penyakit":return self.descriptive(prepared.dataframe)
         work=_filter_disease(scoped,disease)
         if prepared.scope.puskesmas:geographic_level="Puskesmas"
         elif prepared.scope.village:geographic_level="Desa/Kelurahan"
@@ -150,21 +149,17 @@ class IntelligenceEngine:
         else:geographic_level="Indonesia"
         eligibility=validate_scope_for_special_analysis(work,disease,geographic_level,10,14);profile=resolve_disease_profile(disease)
         common={"mode":"epidemiology","eligible":eligibility.eligible,"eligibility":{"reasons":eligibility.reasons,"warnings":eligibility.warnings},"scope":prepared.scope.to_dict(),"overview":{"total_cases":len(work),"provinces":work["Provinsi"].nunique() if "Provinsi" in work else 0,"districts":work["Kabupaten"].nunique() if "Kabupaten" in work else 0,"subdistricts":work["Kecamatan"].nunique() if "Kecamatan" in work else 0,"villages":work["Desa/Kelurahan"].nunique() if "Desa/Kelurahan" in work else 0,"deaths":int(_death_series(work).sum()),"cfr":round(float(_death_series(work).mean()*100),2) if len(work) else 0.0},"disease_profile":profile.__dict__,"provenance":{**prepared.provenance,"analysis_mode":"disease_scoped_epidemiology","ml_enabled":bool(include_ml)}}
+        # KLB surveillance is evaluated even when the special statistical scope is
+        # not eligible, because early detection and data sufficiency are separate.
+        common["klb"] = evaluate_klb(work, disease=profile.name, geographic_scope=geographic_level)
         if not eligibility.eligible:common["message"]="Analisis belum dijalankan karena data/scope belum memenuhi syarat metodologis.";return common
         work=work.copy();work["_death"]=_death_series(work);trias=analyze_trias(work);epi=trias["time"];waves=deteksi_gelombang(epi) if not epi.empty else []
         try:curve=deteksi_bentuk_kurva(epi,profile.name) if len(epi)>=7 else None
         except Exception:curve=None
         spatial=analyze_spatial(work);national_disease_df=_filter_disease(scoped,disease);trias_summary=_trias_summary(work,national_disease_df,profile.name,geographic_level);person=trias["person"].copy();person["Resume TIME + PERSON + PLACE"]=trias_summary["narrative"]
         if not trias_summary["top10_province"].empty:person["10 Besar Wilayah — Provinsi"]=trias_summary["top10_province"]
-        # Disease outcome uses the full scoped cohort, not only disease-positive rows.
-        disease_cohort=scoped.copy();disease_target=_binary_outcome_from_disease(disease_cohort,disease)
-        severity_target=_severity_outcome(work)
-        mortality_target=_death_series(work)
-        outcome_analyses={
-            "Penyakit":_outcome_analysis(disease_cohort,disease_target,"Penyakit",f"Faktor yang berasosiasi dengan kejadian {disease} pada seluruh kasus dalam scope."),
-            "Severity":_outcome_analysis(work,severity_target,"Severity",f"Faktor yang berasosiasi dengan severity pada kasus {disease}."),
-            "Kasus Meninggal":_outcome_analysis(work,mortality_target,"Kasus Meninggal",f"Faktor yang berasosiasi dengan kematian pada kasus {disease}.")
-        }
+        disease_cohort=scoped.copy();disease_target=_binary_outcome_from_disease(disease_cohort,disease);severity_target=_severity_outcome(work);mortality_target=_death_series(work)
+        outcome_analyses={"Penyakit":_outcome_analysis(disease_cohort,disease_target,"Penyakit",f"Faktor yang berasosiasi dengan kejadian {disease} pada seluruh kasus dalam scope."),"Severity":_outcome_analysis(work,severity_target,"Severity",f"Faktor yang berasosiasi dengan severity pada kasus {disease}."),"Kasus Meninggal":_outcome_analysis(work,mortality_target,"Kasus Meninggal",f"Faktor yang berasosiasi dengan kematian pada kasus {disease}.")}
         common.update({"person":person,"place":trias["place"],"trias_summary":trias_summary,"time":epi,"mortality":analyze_mortality(work),"risk":analyze_risk(work),"risk_factors":outcome_analyses["Penyakit"],"outcome_analyses":outcome_analyses,"vulnerable":identifikasi_vulnerable_profile(work),"ews":early_warning(epi),"rt":hitung_effective_rt(epi) if not epi.empty else None,"waves":waves,"forecast":holt_winters_forecast(epi,forecast_days),"spatial":spatial,"epicenters":compute_epicenter(spatial),"temporal_interpretation":classify_temporal_pattern_for_disease(profile,len(waves)),"epidemic_curve_classification":curve,"ml":self.ml_train(work) if include_ml else {"enabled":False,"message":"ML layer tidak dijalankan."}})
         return common
 

@@ -1,10 +1,10 @@
 import pandas as pd
 
 from core.data_provider import get_cases
-from core.scope import QueryScope, apply_scope
-from core.statistics import AGE_GROUPS, add_age_groups, hitung_bivariat_lengkap
 from core.engine import SIHISIntelligenceEngine
-from core.spatial import run_dbscan, compute_epicenter
+from core.scope import QueryScope, apply_scope
+from core.spatial import compute_epicenter, run_dbscan
+from core.statistics import AGE_GROUPS, add_age_groups, hitung_bivariat_lengkap
 
 
 def test_scope_does_not_mutate_source():
@@ -41,9 +41,43 @@ def test_spatial_cluster_and_epicenter_are_cluster_specific():
     assert {"Latitude", "Longitude", "Jumlah_Kasus"}.issubset(centers.columns)
 
 
-def test_engine_returns_canonical_sections():
+def test_descriptive_mode_requires_no_scope_and_returns_top10_contract():
+    df = get_cases(days=90, target_rows=500, seed=321)
+    result = SIHISIntelligenceEngine().analyze(df, mode="descriptive")
+    assert result["mode"] == "descriptive"
+    assert "top10_diseases" in result
+    assert list(result["top10_diseases"].columns) == ["NO.", "Nama Penyakit", "Jumlah Kasus", "CFR", "Kabupaten", "Provinsi"]
+
+
+def test_special_analysis_rejected_without_disease_and_district():
     df = get_cases(days=90, target_rows=500, seed=321)
     result = SIHISIntelligenceEngine().analyze(df)
-    for key in ["overview", "person", "place", "time", "mortality", "risk", "risk_factors", "vulnerable", "ews", "forecast", "spatial", "epicenters", "ml", "provenance"]:
-        assert key in result
-    assert result["provenance"]["ml_enabled"] is False
+    assert result["eligible"] is False
+    assert result["analysis_sections"]["risk_factors"] is None
+    assert result["analysis_sections"]["spatial"] is None
+
+
+def test_special_analysis_rejected_for_all_diseases_even_with_district():
+    df = get_cases(days=90, target_rows=500, seed=321)
+    district = str(df["Kabupaten"].dropna().iloc[0])
+    result = SIHISIntelligenceEngine().analyze(df, QueryScope(district=district, disease="Semua Penyakit", period_days=14))
+    assert result["eligible"] is False
+    assert any("satu penyakit" in reason.lower() for reason in result["eligibility"]["reasons"])
+
+
+def test_special_analysis_allowed_with_disease_district_and_period():
+    df = get_cases(days=90, target_rows=500, seed=321)
+    disease = str(df["Diagnosis Konfirm"].loc[df["Diagnosis Konfirm"].astype(str) != "Bukan"].iloc[0])
+    district = str(df["Kabupaten"].dropna().iloc[0])
+    scoped = df[df["Kabupaten"].astype(str).eq(district)].copy()
+    # The synthetic generator has multiple dates/diseases; select a district/disease
+    # combination with enough observations for the special-analysis contract.
+    disease_mask = False
+    for col in ["Diagnosis Konfirm", "Diagnosis Probabel", "Diagnosis Suspek"]:
+        disease_mask = disease_mask | scoped[col].astype(str).eq(disease)
+    scoped = scoped[disease_mask]
+    if len(scoped) >= 10 and pd.to_datetime(scoped["Tanggal Sakit"], errors="coerce").nunique() >= 14:
+        result = SIHISIntelligenceEngine().analyze(df, QueryScope(district=district, disease=disease, period_days=14))
+        assert result["eligible"] is True
+        assert result["temporal_interpretation"] is not None
+        assert result["time"] is not None

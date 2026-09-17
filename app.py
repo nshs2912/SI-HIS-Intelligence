@@ -80,13 +80,40 @@ def render_risk_factors(risk):
         ors=obj.get('or_by_group')
         if isinstance(ors,pd.DataFrame) and not ors.empty:st.markdown('**Odds Ratio menurut kelompok**');st.dataframe(ors,use_container_width=True,hide_index=True)
 
+def _distribution_narrative(df,label):
+    if not isinstance(df,pd.DataFrame) or df.empty:return ''
+    total=len(df);parts=[]
+    if 'Jenis Kelamin' in df.columns:
+        sex=df['Jenis Kelamin'].astype(str).replace({'nan':'Tidak diketahui'}).value_counts(dropna=False)
+        if not sex.empty:
+            top=sex.index[0];n=int(sex.iloc[0]);pct=n/total*100
+            parts.append(f"Menurut **jenis kelamin**, distribusi seluruh kasus didominasi oleh **{top}**, sebanyak **{n:,} kasus ({pct:.2f}%)** dari seluruh kasus pada scope **{label}**.")
+    if 'Umur' in df.columns:
+        age=pd.to_numeric(df['Umur'],errors='coerce')
+        bins=pd.cut(age,bins=[-np.inf,1,5,10,15,20,25,35,45,55,65,75,85,np.inf],labels=['<1 tahun','1-4 tahun','5-9 tahun','10-14 tahun','15-19 tahun','20-24 tahun','25-34 tahun','35-44 tahun','45-54 tahun','55-64 tahun','65-74 tahun','75-84 tahun','≥85 tahun'],right=False)
+        age_counts=bins.value_counts(sort=False,dropna=True)
+        if not age_counts.empty:
+            top_age=age_counts.idxmax();n=int(age_counts.max());pct=n/total*100
+            parts.append(f"Menurut **kelompok umur**, distribusi seluruh kasus terbesar berada pada kelompok **{top_age}**, sebanyak **{n:,} kasus ({pct:.2f}%)** dari seluruh kasus pada scope **{label}**.")
+    return ' '.join(parts)
+
 def descriptive_narrative(result,label):
     ov=result.get('overview',{}) if isinstance(result,dict) else {};total=int(ov.get('total_cases',0) or 0);deaths=int(ov.get('deaths',0) or 0);parts=[f'Scope **{label}** mencakup **{total:,} kasus/kunjungan** dengan **{deaths:,} kasus meninggal**.']
     top=result.get('top10_diseases') if isinstance(result,dict) else None
     if isinstance(top,pd.DataFrame) and not top.empty:
-        r=top.iloc[0];parts.append(f"Penyakit dengan jumlah kasus terbesar adalah **{r.get('Nama Penyakit','-')}**, sebanyak **{int(r.get('Jumlah Kasus',0)):,} kasus** dengan CFR **{float(r.get('CFR',0)):.2f}%**.")
+        r=top.iloc[0];parts.append(f"Penyakit dengan jumlah kasus terbesar adalah **{r.get('Nama Penyakit','-')}**, sebanyak **{int(r.get('Jumlah Kasus',0)):,} kasus**. Tingkat kematian akibat penyakit tersebut (**CFR**) adalah **{float(r.get('CFR',0)):.2f}%**, yaitu proporsi kasus penyakit tersebut yang meninggal akibat penyakitnya; CFR bukan mortality rate populasi.")
     if isinstance(result.get('province_distribution'),pd.DataFrame) and not result['province_distribution'].empty:
         p=result['province_distribution'].iloc[0];parts.append(f"Distribusi wilayah menunjukkan konsentrasi kasus terbesar pada **{p.get('Provinsi','-')}** sebanyak **{int(p.get('Jumlah Kasus',0)):,} kasus**.")
+    dist=_distribution_narrative(result.get('source_dataframe') if isinstance(result,dict) else None,label)
+    if not dist:
+        sex=result.get('sex_distribution') if isinstance(result,dict) else None
+        age=result.get('age_distribution') if isinstance(result,dict) else None
+        if isinstance(sex,pd.DataFrame) and not sex.empty:
+            row=sex.iloc[0];n=int(row.get('Jumlah Kasus',0));pct=n/total*100 if total else 0;parts.append(f"Menurut **jenis kelamin**, distribusi seluruh kasus didominasi oleh **{row.get('Jenis Kelamin','Tidak diketahui')}**, sebanyak **{n:,} kasus ({pct:.2f}%)** dari seluruh kasus pada scope **{label}**.")
+        if isinstance(age,pd.DataFrame) and not age.empty:
+            valid=age[age['Kelompok Umur'].astype(str).ne('nan')].copy();
+            if not valid.empty:
+                row=valid.sort_values('Jumlah Kasus',ascending=False).iloc[0];n=int(row.get('Jumlah Kasus',0));pct=n/total*100 if total else 0;parts.append(f"Menurut **kelompok umur**, distribusi seluruh kasus terbesar berada pada kelompok **{row.get('Kelompok Umur','Tidak diketahui')}**, sebanyak **{n:,} kasus ({pct:.2f}%)** dari seluruh kasus pada scope **{label}**.")
     parts.append('Temuan ini bersifat deskriptif; interpretasi risiko membutuhkan denominator populasi, definisi outcome, dan analisis epidemiologis lanjutan yang sesuai.')
     return ' '.join(parts)
 
@@ -108,13 +135,12 @@ def curve_narrative(curve,disease):
 
 def forecast_render(fc):
     if not isinstance(fc,dict):render_value(fc);return
-    table=pd.DataFrame({'Tanggal':pd.to_datetime(fc.get('dates',[]),errors='coerce'),'Forecast':fc.get('forecast',[]),'Lower 95%':fc.get('lower',[]),'Upper 95%':fc.get('upper',[])})
-    show_resume(f"Model **{fc.get('model','Holt-Winters')}** memperkirakan tren **{fc.get('trend','-')}**. Forecast adalah estimasi model dan intervalnya menunjukkan ketidakpastian, bukan jumlah kasus yang pasti terjadi.")
+    table=pd.DataFrame({'Tanggal':pd.to_datetime(fc.get('dates',[]),errors='coerce'),'Forecast':fc.get('forecast',[]),'Lower 95%':fc.get('lower',[]),'Upper 95%':fc.get('upper',[])});show_resume(f"Model **{fc.get('model','Holt-Winters')}** memperkirakan tren **{fc.get('trend','-')}**. Forecast adalah estimasi model dan intervalnya menunjukkan ketidakpastian, bukan jumlah kasus yang pasti terjadi.")
     if not table.empty:st.line_chart(table.set_index('Tanggal')[['Forecast','Lower 95%','Upper 95%']]);st.dataframe(table,use_container_width=True,hide_index=True)
 
 def vulnerable_narrative(v):
     if not isinstance(v,list) or not v:return 'Belum ditemukan profil populasi rentan yang memenuhi batas minimal analisis.'
-    d=pd.DataFrame(v);top=d.iloc[0];return f"Metode menggunakan stratifikasi **Kelompok Umur × Pekerjaan × Status Komorbid**, lalu menghitung kasus, kematian, CFR dan Risk Multiplier terhadap baseline. Profil teratas: **{top.get('Age_Group','-')} × {top.get('Pekerjaan','-')} × {top.get('Status Komorbid','-')}**, n={int(top.get('Total',0))}, CFR={float(top.get('CFR (%)',0)):.2f}%. Strata kecil harus ditafsirkan hati-hati."
+    d=pd.DataFrame(v);top=d.iloc[0];return f"Metode menggunakan stratifikasi **Kelompok Umur × Pekerjaan × Status Komorbid**, lalu menghitung kasus, kematian, tingkat kematian akibat penyakit (CFR) dan Risk Multiplier terhadap baseline. Profil teratas: **{top.get('Age_Group','-')} × {top.get('Pekerjaan','-')} × {top.get('Status Komorbid','-')}**, n={int(top.get('Total',0))}, CFR={float(top.get('CFR (%)',0)):.2f}%. Strata kecil harus ditafsirkan hati-hati."
 
 def ml_narrative(ml):
     if not isinstance(ml,dict) or not ml:return 'ML belum dijalankan.'
@@ -139,18 +165,18 @@ with st.sidebar.expander('Drill-down wilayah (opsional)'):
     kecs=sorted(dfk['Kecamatan'].dropna().astype(str).unique()) if 'Kecamatan' in dfk else [];sel_kec=st.selectbox('Kecamatan',['Semua Kecamatan']+kecs);dbase=dfk if sel_kec=='Semua Kecamatan' else dfk[dfk['Kecamatan'].astype(str).eq(sel_kec)];villages=sorted(dbase['Desa/Kelurahan'].dropna().astype(str).unique()) if 'Desa/Kelurahan' in dbase else [];sel_desa=st.selectbox('Desa/Kelurahan',['Semua Desa/Kelurahan']+villages);vbase=dbase if sel_desa=='Semua Desa/Kelurahan' else dbase[dbase['Desa/Kelurahan'].astype(str).eq(sel_desa)];pusk=sorted(vbase['Puskesmas'].dropna().astype(str).unique()) if 'Puskesmas' in vbase else [];sel_pusk=st.selectbox('Puskesmas',['Semua Puskesmas']+pusk)
 include_ml=st.sidebar.checkbox('Aktifkan ML layer',False);scope=QueryScope(province=None if sel_prov=='Semua Provinsi' else sel_prov,district=None if sel_kab=='Semua Kabupaten/Kota' else sel_kab,kecamatan=None if sel_kec=='Semua Kecamatan' else sel_kec,village=None if sel_desa=='Semua Desa/Kelurahan' else sel_desa,puskesmas=None if sel_pusk=='Semua Puskesmas' else sel_pusk,disease=None if sel_disease=='Semua Penyakit' else sel_disease,period_days=3650)
 if sel_disease=='Semua Penyakit':
-    result=engine.descriptive(dfk);label=sel_kab if sel_kab!='Semua Kabupaten/Kota' else (sel_prov if sel_prov!='Semua Provinsi' else 'Indonesia');st.markdown(f'## 📊 Analisis Deskriptif — {label}');ov=result['overview'];a,b=st.columns(2);a.metric('Total Kunjungan Pasien',f"{ov['total_cases']:,}");b.metric('Kasus Meninggal',f"{ov['deaths']:,}");st.markdown('### Resume Epidemiologi');show_resume(descriptive_narrative(result,label));st.markdown('### 🏆 10 Besar Penyakit');show_resume('Tabel ini menunjukkan penyakit dengan beban kasus terbesar dalam scope yang dipilih. Jumlah kasus menggambarkan beban absolut; CFR menggambarkan proporsi kematian di antara kasus dan tidak boleh ditafsirkan sebagai risiko populasi tanpa denominator yang sesuai.');render_value(result['top10_diseases']);st.markdown('### Distribusi');show_resume('Distribusi berikut memperlihatkan komposisi kasus menurut penyakit, jenis kelamin, kelompok umur, provinsi, dan kabupaten/kota. Perbedaan jumlah kasus adalah temuan deskriptif dan tidak otomatis menunjukkan perbedaan risiko.');render_value(result['disease_distribution']);render_value(result['sex_distribution'],'Jenis Kelamin');render_value(result['age_distribution'],'Kelompok Umur');render_value(result['province_distribution'],'Provinsi');render_value(result['district_distribution'].head(50),'Kabupaten/Kota')
+    result=engine.descriptive(dfk);label=sel_kab if sel_kab!='Semua Kabupaten/Kota' else (sel_prov if sel_prov!='Semua Provinsi' else 'Indonesia');st.markdown(f'## 📊 Analisis Deskriptif — {label}');ov=result['overview'];a,b=st.columns(2);a.metric('Total Kunjungan Pasien',f"{ov['total_cases']:,}");b.metric('Kasus Meninggal',f"{ov['deaths']:,}");st.markdown('### Resume Epidemiologi');show_resume(descriptive_narrative(result,label));st.markdown('### 🏆 10 Besar Penyakit');show_resume('Tabel ini menunjukkan penyakit dengan beban kasus terbesar dalam scope yang dipilih. Jumlah kasus menggambarkan beban absolut; CFR menggambarkan proporsi kematian di antara kasus dan tidak boleh ditafsirkan sebagai mortality rate populasi tanpa denominator yang sesuai.');render_value(result['top10_diseases']);st.markdown('### Distribusi');show_resume('Distribusi berikut memperlihatkan komposisi kasus menurut penyakit, jenis kelamin, kelompok umur, provinsi, dan kabupaten/kota. Perbedaan jumlah kasus adalah temuan deskriptif dan tidak otomatis menunjukkan perbedaan risiko.');render_value(result['disease_distribution']);render_value(result['sex_distribution'],'Jenis Kelamin');render_value(result['age_distribution'],'Kelompok Umur');render_value(result['province_distribution'],'Provinsi');render_value(result['district_distribution'].head(50),'Kabupaten/Kota')
 else:
     result=engine.analyze(df_raw,scope=scope,include_ml=include_ml,mode='epidemiology');label=sel_kab if sel_kab!='Semua Kabupaten/Kota' else (sel_prov if sel_prov!='Semua Provinsi' else 'Indonesia');st.markdown(f'## 🧬 Analisis Epidemiologi — {sel_disease}');st.caption(f'Scope: **{sel_disease} — {label}** | TIME + PERSON + PLACE')
     if not result.get('eligible',False):st.warning('Analisis epidemiologi belum dapat dijalankan.');render_value(result.get('eligibility'));st.stop()
-    total=int(result['overview']['total_cases']);mortality=result.get('mortality');deaths=int(mortality.get('deaths',mortality.get('meninggal',0)) or 0) if isinstance(mortality,dict) else 0;cfr=deaths/total*100 if total else 0;a,b,c=st.columns(3);a.metric(f'Total {sel_disease}',f'{total:,}');b.metric('Meninggal',f'{deaths:,}');c.metric('CFR',f'{cfr:.2f}%')
+    total=int(result['overview']['total_cases']);mortality=result.get('mortality');deaths=int(mortality.get('deaths',mortality.get('meninggal',0)) or 0) if isinstance(mortality,dict) else 0;cfr=deaths/total*100 if total else 0;a,b,c=st.columns(3);a.metric(f'Total {sel_disease}',f'{total:,}');b.metric('Meninggal',f'{deaths:,}');c.metric('CFR — tingkat kematian akibat penyakit',f'{cfr:.2f}%')
     tabs=st.tabs(['📊 TIME + PERSON + PLACE','🧪 Faktor Risiko','🚨 Early Warning / KLB','🗺️ Spatial / DBSCAN','📈 Kurva Epidemik','👥 Vulnerable Population','🧠 ML'])
     with tabs[0]:
         tri=result.get('trias_summary',{});show_resume(tri.get('narrative','TIME + PERSON + PLACE menjelaskan kapan, siapa dan di mana kasus terjadi.'));top10=tri.get('top10_province') if isinstance(tri,dict) else None
         if isinstance(top10,pd.DataFrame) and not top10.empty:render_value(top10,'10 Besar Provinsi')
         render_value(result.get('place'),'PLACE');render_value(result.get('person'),'PERSON');t=result.get('time')
         if isinstance(t,pd.DataFrame) and not t.empty:chart=t.copy();chart['Tanggal Sakit']=pd.to_datetime(chart['Tanggal Sakit'],errors='coerce');st.line_chart(chart.dropna(subset=['Tanggal Sakit']).set_index('Tanggal Sakit')['Jumlah Kasus']);show_resume('Distribusi waktu memperlihatkan kapan kasus terjadi dan membantu mengenali perubahan tren, puncak, atau pola gelombang.');render_value(t,'TIME')
-        show_resume('Distribusi mortalitas dan CFR menjelaskan beban kematian relatif terhadap jumlah kasus yang dianalisis. CFR perlu dibaca bersama ukuran sampel, kelengkapan outcome, dan karakteristik kasus.');render_value(mortality,'MORTALITY / CFR')
+        show_resume('Distribusi mortalitas dan CFR menjelaskan beban kematian relatif terhadap jumlah kasus yang dianalisis. CFR adalah proporsi kasus penyakit yang meninggal akibat penyakit tersebut; mortality rate berbeda karena menggunakan populasi sebagai denominator.');render_value(mortality,'MORTALITY / CFR')
     with tabs[1]:
         st.markdown('### Resume Faktor Risiko');show_resume(risk_narrative(result.get('risk_factors')));s=risk_summary(result.get('risk_factors'))
         if not s.empty:st.dataframe(s,use_container_width=True,hide_index=True)

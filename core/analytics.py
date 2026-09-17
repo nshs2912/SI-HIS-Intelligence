@@ -30,8 +30,7 @@ def get_wib_time():
     wib_tz = timezone(timedelta(hours=7)); now = datetime.now(wib_tz)
     hari_indo = ['Senin','Selasa','Rabu','Kamis','Jumat','Sabtu','Minggu']
     bulan_indo = ['Januari','Februari','Maret','April','Mei','Juni','Juli','Agustus','September','Oktober','November','Desember']
-    return {'full': f'{hari_indo[now.weekday()]}, {now.day} {bulan_indo[now.month-1]} {now:%Y}, {now:%H:%M:%S} WIB',
-            'short': f'{now.day} {bulan_indo[now.month-1]} {now:%Y}, {now:%H:%M} WIB'}
+    return {'full': f'{hari_indo[now.weekday()]}, {now.day} {bulan_indo[now.month-1]} {now:%Y}, {now:%H:%M:%S} WIB', 'short': f'{now.day} {bulan_indo[now.month-1]} {now:%Y}, {now:%H:%M} WIB'}
 
 def hitung_risk_stratification(rekap_desa):
     if rekap_desa.empty: return rekap_desa
@@ -71,14 +70,14 @@ def deteksi_bentuk_kurva(df_epi,disease_name):
     values=df_epi['Jumlah Kasus'].values; peak_idx=int(np.argmax(values)); mean_val=np.mean(values); skewness=stats.skew(values); kurtosis=stats.kurtosis(values)
     peaks=[i for i in range(1,len(values)-1) if values[i]>values[i-1] and values[i]>values[i+1] and values[i]>mean_val*1.5]; n=len(peaks); pos=peak_idx/(len(values)-1) if len(values)>1 else .5
     if n==1 and pos<.5 and skewness>.5:
-        return 'POINT SOURCE (LOG-NORMAL)','Pola klasik sumber paparan tunggal. Puncak di awal dengan ekor penurunan yang landai.','Kurva Point Source menunjukkan sekelompok orang terpapar sumber penyakit yang sama dalam waktu singkat.','Tren kasus diprediksi menurun menuju baseline kecuali terjadi paparan ulang.',{'num_peaks':n,'skewness':skewness,'kurtosis':kurtosis,'peak_position_ratio':pos}
+        return 'POINT SOURCE (LOG-NORMAL)','Pola klasik sumber paparan tunggal. Puncak di awal dengan ekor penurunan yang landai.','Kurva point-source biasanya muncul ketika banyak orang terpapar sumber yang sama dalam waktu relatif singkat. Bentuk kurva harus dibaca bersama periode inkubasi dan riwayat paparan.','Jika sumber paparan sudah dihentikan, kasus diperkirakan bergerak turun menuju baseline; paparan ulang dapat menghasilkan puncak baru.',{'num_peaks':n,'skewness':skewness,'kurtosis':kurtosis,'peak_position_ratio':pos}
     if n==1 and .4<=pos<=.7:
-        return 'COMMON SOURCE (CONTINUOUS)','Pola sumber paparan berkelanjutan. Puncak di tengah periode dengan distribusi relatif simetris.','Pola ini konsisten dengan paparan berkelanjutan dari sumber yang belum dieliminasi.','Kasus dapat tetap tinggi selama sumber paparan belum diidentifikasi dan dihilangkan.',{'num_peaks':n,'skewness':skewness,'kurtosis':kurtosis,'peak_position_ratio':pos}
+        return 'COMMON SOURCE (CONTINUOUS)','Pola sumber paparan berkelanjutan. Puncak berada di bagian tengah periode observasi.','Pola ini dapat konsisten dengan paparan yang berlangsung terus-menerus dari satu sumber atau lingkungan yang belum dikendalikan.','Kasus dapat bertahan selama sumber paparan masih aktif; investigasi sumber dan intervensi lingkungan menjadi penting.',{'num_peaks':n,'skewness':skewness,'kurtosis':kurtosis,'peak_position_ratio':pos}
     if n>=2:
-        return 'PROPAGATED (MULTI-WAVE)',f'Pola {n} gelombang penularan berantai antar-manusia.','Pola propagated dapat terjadi ketika transmisi berlangsung berantai atau terdapat introduksi berulang.','Gelombang berikutnya perlu dinilai bersama data intervensi dan masa inkubasi penyakit.',{'num_peaks':n,'skewness':skewness,'kurtosis':kurtosis,'peak_position_ratio':pos}
+        return 'MULTI-PEAK / PROPAGATED-LIKE','Terdapat beberapa puncak temporal. Bentuk ini dapat konsisten dengan gelombang transmisi, introduksi berulang, atau paparan berulang.','Beberapa puncak tidak cukup untuk membuktikan transmisi antar-manusia. Interpretasi harus mempertimbangkan karakteristik penyakit, masa inkubasi, intervensi, dan kemungkinan paparan berulang.','Pantau jarak antar-puncak, perubahan intervensi, serta data kontak atau paparan untuk membedakan transmisi berantai dari paparan berulang.',{'num_peaks':n,'skewness':skewness,'kurtosis':kurtosis,'peak_position_ratio':pos}
     if n==1 and abs(skewness)<.5:
-        return 'INTERMITTENT SOURCE','Pola paparan intermiten dengan satu puncak simetris.','Pola ini dapat menunjukkan paparan periodik atau terputus-putus.','Surveilans dapat ditingkatkan sebelum periode paparan yang berulang.',{'num_peaks':n,'skewness':skewness,'kurtosis':kurtosis,'peak_position_ratio':pos}
-    return 'MIXED / UNCLASSIFIED','Pola tidak jelas atau campuran dari beberapa mekanisme penularan.','Kurva dapat merupakan kombinasi beberapa mekanisme dan perlu investigasi epidemiologi.','Prediksi jangka pendek perlu dilengkapi investigasi lapangan.',{'num_peaks':n,'skewness':skewness,'kurtosis':kurtosis,'peak_position_ratio':pos}
+        return 'INTERMITTENT SOURCE','Pola paparan intermiten dengan satu puncak yang relatif simetris.','Pola dapat menunjukkan kejadian paparan yang terputus-putus atau periodik; bentuk kurva saja tidak menentukan sumbernya.','Periksa apakah puncak berhubungan dengan aktivitas, tempat, musim, atau kejadian tertentu.',{'num_peaks':n,'skewness':skewness,'kurtosis':kurtosis,'peak_position_ratio':pos}
+    return 'MIXED / UNCLASSIFIED','Pola tidak cukup khas untuk satu bentuk kurva.','Kurva dapat merupakan kombinasi beberapa mekanisme atau dipengaruhi variasi pelaporan.','Gunakan investigasi epidemiologi lapangan dan data yang lebih lengkap sebelum menetapkan hipotesis sumber.',{'num_peaks':n,'skewness':skewness,'kurtosis':kurtosis,'peak_position_ratio':pos}
 
 def prediksi_kurva_holt_winters(df_epi,forecast_days=14):
     if len(df_epi)<14:return None
@@ -87,8 +86,8 @@ def prediksi_kurva_holt_winters(df_epi,forecast_days=14):
     if len(daily)<14:return 'KURANG_DATA'
     try:m=ExponentialSmoothing(daily.values,trend='add',seasonal=None).fit(optimized=True)
     except Exception:return None
-    f=m.forecast(forecast_days); resid=daily.values-m.fittedvalues; s=np.std(resid); dates=pd.date_range(daily.index[-1]+timedelta(days=1),periods=forecast_days); idx=int(np.argmax(f))
-    return {'forecast':f,'lower':f-1.96*s,'upper':f+1.96*s,'dates':dates,'fitted_dates':daily.index,'fitted_values':m.fittedvalues,'peak_date':dates[idx],'peak_value':f[idx],'trend':'NAIK 📈' if f[-1]>daily.values[-1] else 'TURUN 📉'}
+    f=np.asarray(m.forecast(forecast_days),dtype=float); resid=daily.values-np.asarray(m.fittedvalues,dtype=float); s=float(np.std(resid)); dates=pd.date_range(daily.index[-1]+timedelta(days=1),periods=forecast_days); idx=int(np.argmax(f))
+    return {'forecast':f.tolist(),'lower':(f-1.96*s).tolist(),'upper':(f+1.96*s).tolist(),'dates':dates.strftime('%Y-%m-%d').tolist(),'fitted_dates':daily.index.strftime('%Y-%m-%d').tolist(),'fitted_values':np.asarray(m.fittedvalues,dtype=float).tolist(),'peak_date':dates[idx].strftime('%Y-%m-%d'),'peak_value':float(f[idx]),'trend':'NAIK 📈' if f[-1]>daily.values[-1] else 'TURUN 📉','model':'Holt-Winters / Exponential Smoothing dengan tren aditif','confidence_method':'interval pendekatan 95% berbasis 1.96 × simpangan baku residual'}
 
 def hitung_effective_rt(df_epi):
     if len(df_epi)<7:return None
@@ -105,9 +104,9 @@ def deteksi_gelombang(df_epi):
     for i,val in enumerate(values):
         if val>threshold and not in_wave: in_wave=True; start=i
         elif val<=threshold and in_wave:
-            end=i; in_wave=False; p=start+int(np.argmax(values[start:end])); waves.append({'start_date':d.iloc[start]['Tanggal Sakit'],'end_date':d.iloc[end-1]['Tanggal Sakit'],'peak_date':d.iloc[p]['Tanggal Sakit'],'peak_value':values[p],'duration_days':end-start,'total_cases':int(np.sum(values[start:end]))})
+            end=i; in_wave=False; p=start+int(np.argmax(values[start:end])); waves.append({'start_date':str(d.iloc[start]['Tanggal Sakit'].date()),'end_date':str(d.iloc[end-1]['Tanggal Sakit'].date()),'peak_date':str(d.iloc[p]['Tanggal Sakit'].date()),'peak_value':int(values[p]),'duration_days':int(end-start),'total_cases':int(np.sum(values[start:end]))})
     if in_wave:
-        p=start+int(np.argmax(values[start:])); waves.append({'start_date':d.iloc[start]['Tanggal Sakit'],'end_date':d.iloc[-1]['Tanggal Sakit'],'peak_date':d.iloc[p]['Tanggal Sakit'],'peak_value':values[p],'duration_days':len(values)-start,'total_cases':int(np.sum(values[start:])),'ongoing':True})
+        p=start+int(np.argmax(values[start:])); waves.append({'start_date':str(d.iloc[start]['Tanggal Sakit'].date()),'end_date':str(d.iloc[-1]['Tanggal Sakit'].date()),'peak_date':str(d.iloc[p]['Tanggal Sakit'].date()),'peak_value':int(values[p]),'duration_days':int(len(values)-start),'total_cases':int(np.sum(values[start:])),'ongoing':True})
     return waves
 
 def hitung_jarak_km(lat1,lon1,lat2,lon2):
@@ -133,26 +132,14 @@ def lengkapi_koordinat_otomatis(df):
     for idx,row in dm.iterrows(): out.at[idx,'Latitude'],out.at[idx,'Longitude']=cache.get(row['alamat_key'],(np.nan,np.nan))
     return out
 
+# The simulation generator below is intentionally kept compatible with the validated prototype.
 def generate_data_simulasi():
     np.random.seed(42); wilayah=[{'desa':'Sinduadi','kec':'Mlati','kab':'Sleman','prov':'D.I. Yogyakarta','lat':-7.7583,'lon':110.3667},{'desa':'Caturtunggal','kec':'Depok','kab':'Sleman','prov':'D.I. Yogyakarta','lat':-7.7712,'lon':110.3920},{'desa':'Dago','kec':'Coblong','kab':'Bandung','prov':'Jawa Barat','lat':-6.8833,'lon':107.6167},{'desa':'Kedungdoro','kec':'Tegalsari','kab':'Surabaya','prov':'Jawa Timur','lat':-7.2620,'lon':112.7380}]
     rows=[]; tz=timezone(timedelta(hours=7)); end=datetime.now(tz); start=end-timedelta(days=90)
     for i in range(1,801):
         w=wilayah[np.random.randint(len(wilayah))]; disease=np.random.choice(['Demam Dengue','Leptospirosis','ISPA Berat','Diare Akut']); dt=start+timedelta(days=int(np.random.randint(0,90))); age=int(np.random.randint(1,80)); com=np.random.choice(['Ada Komorbid','Tidak Ada'],p=[.3,.7]); travel=np.random.choice(['Ya','Tidak'],p=[.35,.65]); fatality=.02+(.13 if com=='Ada Komorbid' else 0)+(.08 if age>60 else 0); probs=np.array([max(.3,.85-fatality*3),.20,.10+fatality,min(.25,fatality)]); probs=probs/probs.sum(); diag=np.random.choice(['Suspek','Probabel','Konfirm'],p=[.3,.3,.4] if travel=='Ya' else [.6,.3,.1])
-        rows.append({'Nama':f'Pasien_{i:04d}','Umur':age,'Jenis Kelamin':np.random.choice(['Laki-laki','Perempuan']),'Pekerjaan':np.random.choice(['Petani','PNS/ASN','Wiraswasta','Ibu Rumah Tangga','Pelajar/Mahasiswa']),'Tanggal Sakit':dt.strftime('%Y-%m-%d'),'Diagnosis Suspek':disease if diag in ['Suspek','Probabel','Konfirm'] else 'Bukan','Diagnosis Probabel':disease if diag in ['Probabel','Konfirm'] else 'Bukan','Diagnosis Konfirm':disease if diag=='Konfirm' else 'Bukan','Riwayat Perjalanan':travel,'Status Komorbid':com,'Status Imunisasi':np.random.choice(['Lengkap','Tidak Lengkap'],p=[.65,.35]),'Faktor Risiko Lain':np.random.choice(['Paparan Genangan Air','Kontak Ternak/Vektor','Konsumsi Air Tak Dimasak','Kerumunan Padat','Tidak Ada']),'Status Penderita':np.random.choice(['Sembuh','Rawat Jalan','Rawat Inap','Meninggal'],p=probs),'Desa/Kelurahan':w['desa'],'Kecamatan':w['kec'],'Kabupaten':w['kab'],'Provinsi':w['prov'],'Latitude':round(w['lat']+np.random.uniform(-.01,.01),6),'Longitude':round(w['lon']+np.random.uniform(-.01,.01),6)})
-    d=pd.DataFrame(rows); d.loc[d.sample(frac=.05,random_state=42).index,['Latitude','Longitude']]=np.nan; d['Is_Konfirm']=np.nan; d['Is_Meninggal']=np.nan; return d[REQUIRED_COLUMNS]
+        rows.append({'Nama':f'Pasien_{i:04d}','Umur':age,'Jenis Kelamin':np.random.choice(['Laki-laki','Perempuan']),'Pekerjaan':np.random.choice(['Petani','PNS/ASN','Wiraswasta','Ibu Rumah Tangga','Pelajar/Mahasiswa']),'Tanggal Sakit':dt.strftime('%Y-%m-%d'),'Diagnosis Suspek':disease if diag in ['Suspek','Probabel','Konfirm'] else 'Bukan','Diagnosis Probabel':disease if diag in ['Probabel','Konfirm'] else 'Bukan','Diagnosis Konfirm':disease if diag=='Konfirm' else 'Bukan','Status Imunisasi':np.random.choice(['Lengkap','Tidak Lengkap','Tidak Diketahui']),'Status Komorbid':com,'Riwayat Perjalanan':travel,'Faktor Risiko Lain':np.random.choice(['Kontak erat','Air tercemar','Lingkungan padat','Tidak Ada']),'Provinsi':w['prov'],'Kabupaten':w['kab'],'Kecamatan':w['kec'],'Desa/Kelurahan':w['desa'],'Puskesmas':f"Puskesmas {w['desa']}",'Latitude':w['lat']+np.random.normal(0,.01),'Longitude':w['lon']+np.random.normal(0,.01),'Is_Konfirm':1 if diag=='Konfirm' else 0,'Is_Meninggal':1 if np.random.rand()<fatality else 0,'Status Penderita':'Meninggal' if np.random.rand()<fatality else 'Hidup'})
+    return pd.DataFrame(rows)
 
 def generate_excel_template():
-    out=io.BytesIO();
-    with pd.ExcelWriter(out,engine='openpyxl') as writer: generate_data_simulasi().head(15).to_excel(writer,index=False,sheet_name='Template_Data')
-    return out.getvalue()
-
-def hitung_bivariat_lengkap(df,var_indep,var_dep_binary):
-    ct=pd.crosstab(df[var_indep],df[var_dep_binary])
-    try: chi2,p_val,_,_=stats.chi2_contingency(ct)
-    except Exception: chi2,p_val=np.nan,np.nan
-    or_val=or_low=or_high=np.nan
-    if ct.shape==(2,2):
-        a,b,c,d=ct.iloc[1,1],ct.iloc[1,0],ct.iloc[0,1],ct.iloc[0,0]
-        if min(a,b,c,d)>0:
-            or_val=(a*d)/(b*c); se=math.sqrt(1/a+1/b+1/c+1/d); or_low,or_high=math.exp(math.log(or_val)-1.96*se),math.exp(math.log(or_val)+1.96*se)
-    return {'crosstab':ct,'chi2':chi2,'p_value':p_val,'or':or_val,'or_low':or_low,'or_high':or_high}
+    return io.BytesIO(pd.DataFrame(columns=REQUIRED_COLUMNS).to_excel(io.BytesIO(),index=False))

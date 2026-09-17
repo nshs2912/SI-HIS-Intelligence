@@ -1,5 +1,4 @@
 import warnings
-
 import folium
 import matplotlib.pyplot as plt
 import pandas as pd
@@ -8,375 +7,149 @@ from streamlit_folium import st_folium
 
 from core.analytics import REQUIRED_COLUMNS, generate_excel_template, get_wib_time, generate_data_simulasi
 from core.engine import SIHISIntelligenceEngine
+from core.scope import QueryScope
 
 warnings.filterwarnings("ignore")
 st.set_page_config(page_title="SI-HIS Intelligence", page_icon="🧠", layout="wide")
-
-st.markdown("""
-<div style="background:#f0e68c;padding:18px 22px;border-radius:12px;border:2px solid #d4c886;">
-<h1 style="margin:0;color:#1e3a8a;font-size:1.7rem;">SI-HIS — Smart Integrated Health Intelligence System</h1>
-<p style="margin:6px 0 0;color:#475569;font-weight:600;">Early Detection, Smarter Intervention</p>
-</div>
-""", unsafe_allow_html=True)
+st.markdown("""<div style="background:#f0e68c;padding:18px 22px;border-radius:12px;border:2px solid #d4c886;"><h1 style="margin:0;color:#1e3a8a;font-size:1.7rem;">SI-HIS — Smart Integrated Health Intelligence System</h1><p style="margin:6px 0 0;color:#475569;font-weight:600;">Early Detection, Smarter Intervention</p></div>""", unsafe_allow_html=True)
 st.caption(f"🕒 Waktu Sistem: {get_wib_time()['full']}")
+engine=SIHISIntelligenceEngine()
 
-engine = SIHISIntelligenceEngine()
-
-# -----------------------------------------------------------------------------
-# DATA SOURCE
-# -----------------------------------------------------------------------------
-st.sidebar.header("⚙️ Panel Kontrol")
-mode_data = st.sidebar.radio(
-    "Sumber Data",
-    ["Gunakan Data Simulasi (AI-Ready)", "Upload File Excel/CSV Custom"],
-    key="data_source_mode",
-)
-
-if mode_data == "Gunakan Data Simulasi (AI-Ready)":
-    df_raw = generate_data_simulasi().copy()
-    st.sidebar.success(f"✅ {len(df_raw):,} kasus simulasi dimuat.")
+st.sidebar.header("⚙️ Panel Kontrol & Filter")
+source=st.sidebar.radio("Sumber Data",["Gunakan Data Simulasi (AI-Ready)","Upload File Excel/CSV Custom"])
+if source.startswith("Gunakan"):
+    df_raw=generate_data_simulasi().copy(); st.sidebar.success(f"✅ {len(df_raw):,} data dimuat.")
 else:
-    uploaded_file = st.sidebar.file_uploader("Upload File Kasus (.xlsx / .csv)", type=["xlsx", "csv"])
-    if uploaded_file is None:
-        st.info("Silakan upload file kasus untuk memulai.")
-        st.stop()
-    try:
-        df_raw = pd.read_csv(uploaded_file) if uploaded_file.name.lower().endswith(".csv") else pd.read_excel(uploaded_file)
-    except Exception as exc:
-        st.error(f"❌ Error membaca file: {exc}")
-        st.stop()
-    missing = [c for c in REQUIRED_COLUMNS if c not in df_raw.columns]
-    if missing:
-        st.error(f"❌ Kolom wajib kurang: {missing}")
-        st.stop()
-    st.sidebar.success(f"✅ {len(df_raw):,} baris data dimuat.")
-
-try:
-    st.sidebar.download_button(
-        "📥 Download Template Excel Standard",
-        generate_excel_template(),
-        "Template_Data_Surveilans.xlsx",
-        "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-        use_container_width=True,
-    )
-except Exception:
-    pass
+    f=st.sidebar.file_uploader("Upload File Kasus",type=["xlsx","csv"])
+    if f is None: st.info("Upload file kasus untuk memulai."); st.stop()
+    try: df_raw=pd.read_csv(f) if f.name.lower().endswith(".csv") else pd.read_excel(f)
+    except Exception as exc: st.error(f"Error membaca file: {exc}"); st.stop()
+    missing=[c for c in REQUIRED_COLUMNS if c not in df_raw.columns]
+    if missing: st.error(f"Kolom wajib kurang: {missing}"); st.stop()
+try: st.sidebar.download_button("📥 Download Template Excel Standard",generate_excel_template(),"Template_Data_Surveilans.xlsx","application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",use_container_width=True)
+except Exception: pass
 
 # -----------------------------------------------------------------------------
-# TWO-MODE ANALYTICAL FLOW
+# THREE FILTERS — ALWAYS PRESENT
 # -----------------------------------------------------------------------------
 st.sidebar.markdown("---")
-st.sidebar.subheader("🧠 Mode Analisis")
-analysis_mode = st.sidebar.radio(
-    "Pilih mode",
-    [
-        "Deskriptif Nasional",
-        "Analisis Epidemiologi Terarah",
-    ],
-    key="analysis_mode",
+st.sidebar.subheader("📍 Filter Analisis Epidemiologi")
+provinces=sorted(df_raw["Provinsi"].dropna().astype(str).unique()) if "Provinsi" in df_raw else []
+sel_prov=st.sidebar.selectbox("1. Provinsi",["Semua Provinsi"]+provinces)
+dfp=df_raw if sel_prov=="Semua Provinsi" else df_raw[df_raw["Provinsi"].astype(str).eq(sel_prov)]
+districts=sorted(dfp["Kabupaten"].dropna().astype(str).unique()) if "Kabupaten" in dfp else []
+sel_kab=st.sidebar.selectbox("2. Kabupaten/Kota",["Semua Kabupaten/Kota"]+districts)
+dfk=dfp if sel_kab=="Semua Kabupaten/Kota" else dfp[dfp["Kabupaten"].astype(str).eq(sel_kab)]
+
+disease_values=set()
+for col in ["Diagnosis Konfirm","Diagnosis Probabel","Diagnosis Suspek"]:
+    if col in df_raw.columns:
+        disease_values.update(str(x).strip() for x in df_raw[col].dropna().unique() if str(x).strip().lower() not in {"","nan","bukan","none","tidak ada","-"})
+diseases=sorted(disease_values)
+sel_disease=st.sidebar.selectbox("3. Diagnosis Penyakit",["Semua Penyakit"]+diseases)
+
+# Optional drill-down geography. These never change the three primary filter semantics.
+with st.sidebar.expander("Drill-down wilayah (opsional)"):
+    kecs=sorted(dfk["Kecamatan"].dropna().astype(str).unique()) if "Kecamatan" in dfk else []
+    sel_kec=st.selectbox("Kecamatan",["Semua Kecamatan"]+kecs)
+    dbase=dfk if sel_kec=="Semua Kecamatan" else dfk[dfk["Kecamatan"].astype(str).eq(sel_kec)]
+    villages=sorted(dbase["Desa/Kelurahan"].dropna().astype(str).unique()) if "Desa/Kelurahan" in dbase else []
+    sel_desa=st.selectbox("Desa/Kelurahan",["Semua Desa/Kelurahan"]+villages)
+    vbase=dbase if sel_desa=="Semua Desa/Kelurahan" else dbase[dbase["Desa/Kelurahan"].astype(str).eq(sel_desa)]
+    pusk=sorted(vbase["Puskesmas"].dropna().astype(str).unique()) if "Puskesmas" in vbase else []
+    sel_pusk=st.selectbox("Puskesmas",["Semua Puskesmas"]+pusk)
+
+include_ml=st.sidebar.checkbox("Aktifkan ML layer",False)
+
+# Primary scope dataframe. Disease is intentionally resolved by engine, not QueryScope.
+scope=QueryScope(
+    province=None if sel_prov=="Semua Provinsi" else sel_prov,
+    district=None if sel_kab=="Semua Kabupaten/Kota" else sel_kab,
+    kecamatan=None if sel_kec=="Semua Kecamatan" else sel_kec,
+    village=None if sel_desa=="Semua Desa/Kelurahan" else sel_desa,
+    puskesmas=None if sel_pusk=="Semua Puskesmas" else sel_pusk,
+    disease=None if sel_disease=="Semua Penyakit" else sel_disease,
+    period_days=3650,
 )
 
-if analysis_mode == "Deskriptif Nasional":
-    st.markdown("## 🇮🇩 SI-HIS — Analisis Deskriptif Nasional")
-    st.caption(
-        "Mode deskriptif tidak memerlukan filter penyakit atau wilayah. "
-        "Sistem memaparkan distribusi kasus berdasarkan penyakit, wilayah, jenis kelamin, dan kelompok umur."
-    )
-    result = engine.analyze(df_raw, mode="descriptive")
-
-    ov = result["overview"]
-    c1, c2, c3 = st.columns(3)
-    c1.metric("Total Kasus", f"{ov['total_cases']:,}")
-    c2.metric("Meninggal", f"{ov['deaths']:,}")
-    c3.metric("CFR", f"{ov['cfr']:.2f}%")
-
-    st.markdown("### 🏆 10 Besar Penyakit di Seluruh Indonesia")
-    top10 = result["top10_diseases"].copy()
-    if not top10.empty:
-        # Keep the requested national table contract exactly.
-        st.dataframe(
-            top10[["NO.", "Nama Penyakit", "Jumlah Kasus", "CFR", "Kabupaten", "Provinsi"]],
-            use_container_width=True,
-            hide_index=True,
-        )
-        st.caption("Kabupaten pada tabel menunjukkan kabupaten/kota dengan kontribusi kasus terbanyak untuk penyakit tersebut.")
-    else:
-        st.info("Belum ada distribusi penyakit yang dapat ditampilkan.")
-
-    st.markdown("### 🦠 Distribusi Semua Penyakit")
-    st.dataframe(result["disease_distribution"], use_container_width=True, hide_index=True)
-
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("### 🗺️ Distribusi Provinsi")
-        st.dataframe(result["province_distribution"], use_container_width=True, hide_index=True)
-    with col2:
-        st.markdown("### 🏘️ Distribusi Kabupaten/Kota")
-        st.dataframe(result["district_distribution"].head(50), use_container_width=True, hide_index=True)
-
-    col3, col4 = st.columns(2)
-    with col3:
-        st.markdown("### 👤 Distribusi Jenis Kelamin")
-        st.dataframe(result["sex_distribution"], use_container_width=True, hide_index=True)
-    with col4:
-        st.markdown("### 🎂 Distribusi Kelompok Umur")
-        st.dataframe(result["age_distribution"], use_container_width=True, hide_index=True)
-
-    st.info(
-        "ℹ️ Mode ini bersifat deskriptif. Tidak menjalankan bivariat, multivariat, faktor risiko, "
-        "episentrum, DBSCAN, kurva epidemik, forecast, atau analisis KLB khusus."
-    )
-
+# Disease is the switch between descriptive and disease-specific epidemiology.
+if sel_disease=="Semua Penyakit":
+    result=engine.descriptive(dfk if (sel_prov!="Semua Provinsi" or sel_kab!="Semua Kabupaten/Kota") else df_raw)
+    geographic_label="Indonesia" if sel_prov=="Semua Provinsi" and sel_kab=="Semua Kabupaten/Kota" else (sel_kab if sel_kab!="Semua Kabupaten/Kota" else sel_prov)
+    st.markdown(f"## 📊 Analisis Deskriptif — {geographic_label}")
+    st.caption("Semua Penyakit → hanya analisis deskriptif. Angka kematian gabungan tidak disebut CFR.")
+    ov=result["overview"]
+    a,b=st.columns(2); a.metric("Total Kunjungan Pasien",f"{ov['total_cases']:,}"); b.metric("Kasus Meninggal",f"{ov['deaths']:,}")
+    st.markdown("### 🏆 10 Besar Penyakit")
+    st.dataframe(result["top10_diseases"],use_container_width=True,hide_index=True)
+    c1,c2=st.columns(2)
+    with c1: st.markdown("### Distribusi Penyakit"); st.dataframe(result["disease_distribution"],use_container_width=True,hide_index=True)
+    with c2: st.markdown("### Distribusi Jenis Kelamin"); st.dataframe(result["sex_distribution"],use_container_width=True,hide_index=True)
+    c3,c4=st.columns(2)
+    with c3: st.markdown("### Distribusi Kelompok Umur"); st.dataframe(result["age_distribution"],use_container_width=True,hide_index=True)
+    with c4: st.markdown("### Distribusi Kabupaten/Kota"); st.dataframe(result["district_distribution"].head(50),use_container_width=True,hide_index=True)
+    st.info("Mode deskriptif tidak menjalankan bivariat, multivariat, faktor risiko, EWS/KLB, DBSCAN, episentrum, kurva epidemik, forecast, atau prediksi penyakit.")
+    st.caption("Catatan: CFR pada tabel 10 besar dihitung per penyakit; bukan CFR gabungan seluruh penyakit.")
 else:
-    # -------------------------------------------------------------------------
-    # SCOPED EPIDEMIOLOGY FILTERS
-    # -------------------------------------------------------------------------
-    st.markdown("## 🧬 SI-HIS — Analisis Epidemiologi Terarah")
-    st.caption("TIME + PERSON + PLACE adalah inti analisis epidemiologi.")
-
-    provinces = sorted(df_raw.get("Provinsi", pd.Series(dtype=str)).dropna().astype(str).unique())
-    sel_province = st.sidebar.selectbox("Provinsi", ["Pilih Provinsi"] + provinces, index=0)
-
-    if sel_province != "Pilih Provinsi":
-        df_province = df_raw[df_raw["Provinsi"].astype(str).eq(sel_province)]
-    else:
-        df_province = df_raw.iloc[0:0]
-
-    districts = sorted(df_province.get("Kabupaten", pd.Series(dtype=str)).dropna().astype(str).unique())
-    sel_district = st.sidebar.selectbox("Kabupaten/Kota — WAJIB", ["Pilih Kabupaten/Kota"] + districts, index=0)
-
-    if sel_district != "Pilih Kabupaten/Kota":
-        df_district = df_province[df_province["Kabupaten"].astype(str).eq(sel_district)]
-    else:
-        df_district = df_province.iloc[0:0]
-
-    subdistricts = sorted(df_district.get("Kecamatan", pd.Series(dtype=str)).dropna().astype(str).unique())
-    sel_kecamatan = st.sidebar.selectbox("Kecamatan — opsional", ["Semua Kecamatan"] + subdistricts)
-    villages_base = df_district if sel_kecamatan == "Semua Kecamatan" else df_district[df_district["Kecamatan"].astype(str).eq(sel_kecamatan)]
-    villages = sorted(villages_base.get("Desa/Kelurahan", pd.Series(dtype=str)).dropna().astype(str).unique())
-    sel_village = st.sidebar.selectbox("Desa/Kelurahan — opsional", ["Semua Desa/Kelurahan"] + villages)
-
-    if sel_village == "Semua Desa/Kelurahan":
-        facilities_base = villages_base
-    else:
-        facilities_base = villages_base[villages_base["Desa/Kelurahan"].astype(str).eq(sel_village)]
-    facilities = sorted(facilities_base.get("Puskesmas", pd.Series(dtype=str)).dropna().astype(str).unique())
-    sel_puskesmas = st.sidebar.selectbox("Puskesmas — opsional", ["Semua Puskesmas"] + facilities)
-
-    disease_values = set()
-    for column in ["Diagnosis Konfirm", "Diagnosis Probabel", "Diagnosis Suspek"]:
-        if column in df_raw.columns:
-            disease_values.update(
-                str(x).strip() for x in df_raw[column].dropna().unique()
-                if str(x).strip().lower() not in {"", "nan", "bukan", "none"}
-            )
-    diseases = sorted(disease_values)
-    sel_disease = st.sidebar.selectbox("Penyakit — WAJIB", ["Pilih Penyakit"] + diseases, index=0)
-    period_days = st.sidebar.number_input("Periode observasi (hari)", min_value=14, max_value=365, value=14, step=1)
-    include_ml = st.sidebar.checkbox("Aktifkan ML layer", value=False)
-
-    # Hard gate: no special epidemiology until disease + minimum geographic unit are selected.
-    if sel_disease == "Pilih Penyakit" or sel_district == "Pilih Kabupaten/Kota":
-        st.warning(
-            "🔒 Analisis epidemiologi khusus dikunci. Pilih **1 penyakit** dan minimal **1 Kabupaten/Kota** "
-            "serta periode observasi ≥14 hari. Setelah scope lengkap, SI-HIS akan menjalankan TIME + PERSON + PLACE "
-            "dan analisis lanjutan."
-        )
-        st.markdown("### Alur analisis")
-        st.code(
-            "Penyakit + Kabupaten/Kota + Periode\n"
-            "↓\nTIME + PERSON + PLACE\n"
-            "↓\nFaktor Risiko → Bivariat → Multivariat\n"
-            "↓\nEWS/KLB → DBSCAN → Episentrum\n"
-            "↓\nKurva Epidemik → Forecast → Vulnerable Population\n"
-            "↓\nAI/ML → Intelligence & Recommendation"
-        )
+    # Disease-specific mode: Indonesia / Province / District are all valid analytical scopes.
+    result=engine.analyze(df_raw,scope=scope,include_ml=include_ml,mode="epidemiology")
+    geographic_label=sel_kab if sel_kab!="Semua Kabupaten/Kota" else (sel_prov if sel_prov!="Semua Provinsi" else "Indonesia")
+    st.markdown(f"## 🧬 Analisis Epidemiologi — {sel_disease}")
+    st.caption(f"Scope: **{sel_disease} — {geographic_label}** | TIME + PERSON + PLACE")
+    if not result.get("eligible",False):
+        st.warning("Analisis epidemiologi belum dapat dijalankan.")
+        for r in result.get("eligibility",{}).get("reasons",[]): st.write("• "+r)
         st.stop()
-
-    scope = {
-        "province": None if sel_province == "Pilih Provinsi" else sel_province,
-        "district": sel_district,
-        "kecamatan": None if sel_kecamatan == "Semua Kecamatan" else sel_kecamatan,
-        "village": None if sel_village == "Semua Desa/Kelurahan" else sel_village,
-        "puskesmas": None if sel_puskesmas == "Semua Puskesmas" else sel_puskesmas,
-        "disease": sel_disease,
-        "period_days": int(period_days),
-    }
-    from core.scope import QueryScope
-    result = engine.analyze(df_raw, scope=QueryScope(**scope), include_ml=include_ml, mode="epidemiology")
-
-    if not result["eligible"]:
-        st.error("🔒 Scope belum memenuhi syarat analisis epidemiologi.")
-        for reason in result["eligibility"]["reasons"]:
-            st.write(f"• {reason}")
-        if result["eligibility"]["warnings"]:
-            for warning in result["eligibility"]["warnings"]:
-                st.warning(warning)
-        st.stop()
-
-    st.success(
-        f"✅ Scope aktif: **{sel_disease}** | **{sel_district}** | **{period_days} hari**"
-    )
-    if result["eligibility"]["warnings"]:
-        for warning in result["eligibility"]["warnings"]:
-            st.warning(warning)
-
-    overview = result["overview"]
-    c1, c2, c3, c4 = st.columns(4)
-    c1.metric("Kasus", f"{overview['total_cases']:,}")
-    c2.metric("Kabupaten", f"{overview['districts']:,}")
-    c3.metric("Kecamatan", f"{overview['subdistricts']:,}")
-    c4.metric("Desa/Kelurahan", f"{overview['villages']:,}")
-
-    tabs = st.tabs([
-        "📊 TIME + PERSON + PLACE",
-        "🧪 Faktor Risiko",
-        "🚨 EWS / KLB",
-        "🗺️ Spatial / DBSCAN",
-        "📈 Kurva & Forecast",
-        "👥 Vulnerable",
-        "🧠 AI / ML",
-    ])
-
+    ov=result["overview"]
+    # Disease-specific denominator: CFR is valid here.
+    mortality=result.get("mortality")
+    deaths=0
+    if isinstance(mortality,dict): deaths=mortality.get("deaths",mortality.get("meninggal",0)) or 0
+    elif isinstance(mortality,pd.DataFrame) and "Meninggal" in mortality.columns: deaths=int(mortality["Meninggal"].sum())
+    total=ov["total_cases"]; cfr=(deaths/total*100) if total else 0
+    a,b,c=st.columns(3); a.metric(f"Total {sel_disease}",f"{total:,}"); b.metric(f"Meninggal {sel_disease}",f"{deaths:,}"); c.metric("CFR",f"{cfr:.2f}%")
+    if result.get("eligibility",{}).get("warnings"):
+        for w in result["eligibility"]["warnings"]: st.warning(w)
+    tabs=st.tabs(["📊 TIME + PERSON + PLACE","🧪 Faktor Risiko","🚨 EWS/KLB","🗺️ Spatial/DBSCAN","📈 Kurva & Forecast","👥 Vulnerable","🧠 AI/ML"])
     with tabs[0]:
-        st.markdown("### TIME + PERSON + PLACE")
-        st.markdown("#### PLACE")
-        place = result.get("place")
-        if isinstance(place, pd.DataFrame):
-            st.dataframe(place, use_container_width=True, hide_index=True)
-        else:
-            st.write(place)
-
-        st.markdown("#### PERSON")
-        person = result.get("person")
-        if isinstance(person, dict):
-            for key, value in person.items():
-                st.markdown(f"**{key}**")
-                if isinstance(value, pd.DataFrame):
-                    st.dataframe(value, use_container_width=True, hide_index=True)
-                else:
-                    st.write(value)
-        elif isinstance(person, pd.DataFrame):
-            st.dataframe(person, use_container_width=True, hide_index=True)
-        else:
-            st.write(person)
-
-        st.markdown("#### TIME")
-        time_df = result.get("time")
-        if isinstance(time_df, pd.DataFrame) and not time_df.empty:
-            st.line_chart(time_df.set_index("Tanggal Sakit")["Jumlah Kasus"])
-            st.dataframe(time_df, use_container_width=True, hide_index=True)
-        else:
-            st.info("Kurva waktu belum tersedia.")
-
-        st.markdown("#### MORTALITY / CFR")
-        mortality = result.get("mortality")
-        if isinstance(mortality, pd.DataFrame):
-            st.dataframe(mortality, use_container_width=True, hide_index=True)
-        else:
-            st.write(mortality)
-
+        st.markdown("### PLACE"); st.dataframe(result.get("place",pd.DataFrame()),use_container_width=True,hide_index=True)
+        st.markdown("### PERSON")
+        person=result.get("person",{})
+        if isinstance(person,dict):
+            for k,v in person.items():
+                st.markdown(f"**{k}**"); st.dataframe(v,use_container_width=True,hide_index=True) if isinstance(v,pd.DataFrame) else st.write(v)
+        st.markdown("### TIME")
+        t=result.get("time")
+        if isinstance(t,pd.DataFrame) and not t.empty: st.line_chart(t.set_index("Tanggal Sakit")["Jumlah Kasus"]); st.dataframe(t,use_container_width=True,hide_index=True)
+        st.markdown("### MORTALITY / CFR"); st.write(mortality)
     with tabs[1]:
-        st.markdown("### 🧪 Faktor Risiko — Bivariat & Multivariat")
-        st.caption("Analisis ini hanya dijalankan setelah scope penyakit + Kabupaten/Kota + periode memenuhi syarat.")
-        risk = result.get("risk_factors")
-        if isinstance(risk, dict):
-            for key, value in risk.items():
-                st.markdown(f"#### {key}")
-                if isinstance(value, pd.DataFrame):
-                    st.dataframe(value, use_container_width=True, hide_index=True)
-                else:
-                    st.write(value)
-        elif isinstance(risk, pd.DataFrame):
-            st.dataframe(risk, use_container_width=True, hide_index=True)
-        else:
-            st.info("Hasil faktor risiko belum tersedia.")
-        st.caption("OR/association tidak ditafsirkan sebagai hubungan kausal tanpa desain dan validasi epidemiologis yang sesuai.")
-
+        r=result.get("risk_factors")
+        if isinstance(r,dict):
+            for k,v in r.items(): st.markdown(f"#### {k}"); st.dataframe(v,use_container_width=True,hide_index=True) if isinstance(v,pd.DataFrame) else st.write(v)
+        else: st.write(r)
+        st.caption("Asosiasi/OR bukan bukti kausalitas tanpa desain dan validasi epidemiologis yang sesuai.")
     with tabs[2]:
-        st.markdown("### 🚨 Early Warning / KLB")
-        ews = result.get("ews")
-        if isinstance(ews, dict):
-            st.json(ews)
-        else:
-            st.write(ews)
-        st.markdown("### Disease-aware temporal interpretation")
-        temporal = result.get("temporal_interpretation")
-        if temporal:
-            st.info(temporal.get("interpretation", "Interpretasi temporal tersedia."))
-            st.caption("Puncak matematis tidak otomatis membuktikan transmisi antar-manusia.")
-        st.markdown("### Effective Rt")
-        st.write(result.get("rt"))
-
+        st.json(result.get("ews",{})); st.markdown("### Interpretasi temporal disease-aware"); st.info(result.get("temporal_interpretation",{}).get("interpretation","Interpretasi temporal tersedia.")); st.write("Rₜ:",result.get("rt"))
     with tabs[3]:
-        st.markdown("### 🗺️ Spatial / DBSCAN & Episentrum")
-        spatial = result.get("spatial")
-        if isinstance(spatial, pd.DataFrame):
-            st.dataframe(spatial, use_container_width=True, hide_index=True)
-            geo = spatial.dropna(subset=["Latitude", "Longitude"]).copy() if {"Latitude", "Longitude"}.issubset(spatial.columns) else pd.DataFrame()
+        spatial=result.get("spatial")
+        if isinstance(spatial,pd.DataFrame):
+            st.dataframe(spatial,use_container_width=True,hide_index=True)
+            geo=spatial.dropna(subset=["Latitude","Longitude"]) if {"Latitude","Longitude"}.issubset(spatial.columns) else pd.DataFrame()
             if not geo.empty:
-                center = [float(geo["Latitude"].mean()), float(geo["Longitude"].mean())]
-                m = folium.Map(location=center, zoom_start=10)
-                for _, row in geo.head(500).iterrows():
-                    folium.CircleMarker(
-                        [float(row["Latitude"]), float(row["Longitude"])],
-                        radius=4,
-                        popup=f"{row.get('Desa/Kelurahan', '')} | Cluster {row.get('Cluster', '')}",
-                    ).add_to(m)
-                st_folium(m, width=None, height=550)
-        else:
-            st.write(spatial)
-        st.markdown("### Episentrum")
-        epicenter = result.get("epicenters")
-        if isinstance(epicenter, pd.DataFrame):
-            st.dataframe(epicenter, use_container_width=True, hide_index=True)
-        else:
-            st.write(epicenter)
-
+                m=folium.Map(location=[float(geo.Latitude.mean()),float(geo.Longitude.mean())],zoom_start=9)
+                for _,row in geo.head(500).iterrows(): folium.CircleMarker([float(row.Latitude),float(row.Longitude)],radius=4,popup=f"{row.get('Desa/Kelurahan','')} | Cluster {row.get('Cluster','')}").add_to(m)
+                st_folium(m,width=None,height=500)
+        st.markdown("### Episentrum"); st.dataframe(result.get("epicenters",pd.DataFrame()),use_container_width=True,hide_index=True)
     with tabs[4]:
-        st.markdown("### 📈 Kurva Epidemik & Forecast")
-        curve = result.get("epidemic_curve_classification")
-        if curve:
-            st.write(curve)
-        time_df = result.get("time")
-        if isinstance(time_df, pd.DataFrame) and not time_df.empty:
-            fig, ax = plt.subplots(figsize=(12, 4))
-            ax.plot(time_df["Tanggal Sakit"], time_df["Jumlah Kasus"], marker="o", label="Kasus")
-            ax.set_xlabel("Tanggal")
-            ax.set_ylabel("Jumlah Kasus")
-            ax.grid(alpha=0.3)
-            ax.legend()
-            st.pyplot(fig)
-        forecast = result.get("forecast")
-        if isinstance(forecast, dict):
-            st.json(forecast)
-        else:
-            st.write(forecast)
-        waves = result.get("waves")
-        if waves:
-            st.markdown("### Pola Gelombang")
-            st.dataframe(pd.DataFrame(waves), use_container_width=True, hide_index=True)
-
+        st.write(result.get("epidemic_curve_classification")); t=result.get("time")
+        if isinstance(t,pd.DataFrame) and not t.empty: st.line_chart(t.set_index("Tanggal Sakit")["Jumlah Kasus"])
+        st.write("Forecast:",result.get("forecast")); waves=result.get("waves",[])
+        if waves: st.dataframe(pd.DataFrame(waves),use_container_width=True,hide_index=True)
     with tabs[5]:
-        st.markdown("### 👥 Vulnerable Population")
-        vulnerable = result.get("vulnerable")
-        if isinstance(vulnerable, list) and vulnerable:
-            st.dataframe(pd.DataFrame(vulnerable), use_container_width=True, hide_index=True)
-        elif isinstance(vulnerable, pd.DataFrame):
-            st.dataframe(vulnerable, use_container_width=True, hide_index=True)
-        else:
-            st.info("Profil populasi rentan belum tersedia pada scope ini.")
-
+        v=result.get("vulnerable")
+        st.dataframe(pd.DataFrame(v),use_container_width=True,hide_index=True) if isinstance(v,list) else st.write(v)
     with tabs[6]:
-        st.markdown("### 🧠 AI / ML Intelligence")
-        if not include_ml:
-            st.info("ML tidak dijalankan. Aktifkan **ML layer** pada sidebar jika ingin menambahkan modul prediktif.")
-        else:
-            ml = result.get("ml", {})
-            st.json({k: v for k, v in ml.items() if not isinstance(v, pd.DataFrame)})
-            st.warning(
-                "Output AI/ML adalah decision-support. Model tidak menggantikan validasi epidemiologis, "
-                "investigasi lapangan, keputusan klinis, atau kewenangan penetapan KLB/wabah."
-            )
+        if include_ml: st.json({k:v for k,v in result.get("ml",{}).items() if not isinstance(v,pd.DataFrame)})
+        else: st.info("ML layer tidak diaktifkan.")
 
-st.caption("SI-HIS Intelligence — canonical intelligence engine: descriptive mode + disease-scoped epidemiological intelligence.")
+st.caption("SI-HIS Intelligence — disease-specific epidemiology is activated by Diagnosis Penyakit; geographic scope may be Indonesia, Province, or Kabupaten/Kota.")

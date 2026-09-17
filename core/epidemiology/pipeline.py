@@ -44,6 +44,9 @@ def validate_scope_for_special_analysis(df: pd.DataFrame, disease: str | None, g
             reasons.append("Tidak ada Tanggal Sakit yang valid.")
         elif (dates.max() - dates.min()).days + 1 < minimum_days:
             warnings.append(f"Rentang waktu observasi < {minimum_days} hari; modul temporal tertentu mungkin tidak tersedia.")
+    # Indonesia, Province, and Kabupaten/Kota are all valid disease-specific scopes.
+    if geographic_level not in {"Indonesia", "Provinsi", "Kabupaten", "Kecamatan", "Desa/Kelurahan", "Puskesmas"}:
+        warnings.append("Level geografis tidak teridentifikasi; analisis tetap menggunakan data yang sudah terscope.")
     return AnalysisEligibility(not reasons, reasons, warnings)
 
 def classify_temporal_pattern_for_disease(profile: DiseaseProfile, detected_peaks: int) -> dict[str, Any]:

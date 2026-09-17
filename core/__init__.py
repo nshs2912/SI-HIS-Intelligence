@@ -1,5 +1,8 @@
 """SI-HIS core compatibility, synthetic national data, and presentation helpers."""
 
+import numpy as np
+import pandas as pd
+
 from . import analytics as _analytics
 
 # National synthetic dataset becomes the canonical demo source for the existing
@@ -27,8 +30,6 @@ def _prepare_binary_target(df):
 def _hitung_multivariat_logistik(df):
     """Restore the app16-style multivariable logistic regression output."""
     try:
-        import numpy as np
-        import pandas as pd
         import statsmodels.api as sm
 
         work = _prepare_binary_target(df)
@@ -51,14 +52,18 @@ def _hitung_multivariat_logistik(df):
                 model_df[col] = model_df[col].astype(str)
         model_df = model_df.dropna()
         y = pd.to_numeric(model_df["Is_Konfirm"], errors="coerce").astype(int)
-        X = pd.get_dummies(model_df[available], columns=[c for c in available if c != "Umur"], drop_first=True, dtype=float)
+        X = pd.get_dummies(
+            model_df[available],
+            columns=[c for c in available if c != "Umur"],
+            drop_first=True,
+            dtype=float,
+        )
         X = X.replace([np.inf, -np.inf], np.nan).dropna()
         y = y.loc[X.index]
         if len(X) < 30 or y.nunique() < 2 or X.shape[1] == 0:
             return pd.DataFrame()
 
         X = sm.add_constant(X, has_constant="add")
-        # Remove zero-variance predictors to avoid singular matrices.
         keep = [c for c in X.columns if c == "const" or X[c].nunique(dropna=False) > 1]
         X = X[keep]
         model = sm.Logit(y, X).fit(disp=False, maxiter=200)
@@ -73,7 +78,10 @@ def _hitung_multivariat_logistik(df):
         })
         result = result[result["Variabel"] != "const"].copy()
         result["Signifikan (p<0.05)"] = result["p_value"] < 0.05
-        return result.round({"Koefisien (β)": 4, "OR": 4, "OR_Lower_95%": 4, "OR_Upper_95%": 4, "p_value": 4})
+        return result.round({
+            "Koefisien (β)": 4, "OR": 4, "OR_Lower_95%": 4,
+            "OR_Upper_95%": 4, "p_value": 4,
+        })
     except Exception as exc:
         return pd.DataFrame([{
             "Variabel": "MODEL_ERROR",
@@ -112,9 +120,6 @@ def _hitung_bivariat_compat(df, var_indep=None, var_dep_binary=None):
         except Exception as exc:
             results[variable] = {"error": str(exc)}
 
-    # The old app16 interface exposed multivariable logistic regression below
-    # the bivariate analyses; return it in the same result object so app.py
-    # renders it without changing the validated UI structure.
     results["MULTIVARIAT — Logistic Regression"] = _hitung_multivariat_logistik(work)
     return results
 

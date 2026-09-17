@@ -1,37 +1,24 @@
 """Canonical SI-HIS intelligence orchestration facade.
 
-This module is the boundary between data/scope and analytical algorithms. It keeps
-request filtering isolated and makes the same analytics reusable by Kemenkes,
-Dinkes, Puskesmas, clinical and mobile consumers.
+One canonical engine serves Streamlit, FastAPI and future Kemenkes/Dinkes/
+Puskesmas consumers. Analytical modules remain independently testable.
 """
 from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import Any
-
 import pandas as pd
 
-from .analytics import (
-    hitung_risk_stratification,
-    identifikasi_vulnerable_profile,
-    hitung_early_warning_score,
-    deteksi_bentuk_kurva,
-    prediksi_kurva_holt_winters,
-    hitung_effective_rt,
-    deteksi_gelombang,
-)
+from .analytics import identifikasi_vulnerable_profile, hitung_effective_rt, deteksi_gelombang
 from .ml_engine import (
-    train_case_severity,
-    predict_case_severity,
-    train_klb_prediction,
-    predict_klb,
-    train_spatial_outbreak,
-    predict_spatial_outbreak,
+    train_case_severity, train_klb_prediction, train_spatial_outbreak,
     train_vulnerable_population,
-    predict_vulnerable_population,
-    robust_forecast,
 )
 from .scope import QueryScope, apply_scope, scope_label
+from .epidemiology import analyze_trias, analyze_mortality, analyze_risk
+from .surveillance import early_warning
+from .forecasting import holt_winters_forecast
+from .spatial import run_dbscan, compute_epicenter
+from .statistics import hitung_bivariat_lengkap, multivariable_logistic
 
 
 @dataclass(frozen=True)
@@ -42,7 +29,7 @@ class IntelligenceResult:
 
 
 class IntelligenceEngine:
-    """Stateless facade for one isolated intelligence request."""
+    """Stateless facade for an isolated SI-HIS intelligence request."""
 
     def prepare(self, df: pd.DataFrame, scope: QueryScope | None = None) -> IntelligenceResult:
         query_scope = (scope or QueryScope()).normalized()
@@ -60,41 +47,62 @@ class IntelligenceEngine:
             },
         )
 
-    def epidemiology(self, df: pd.DataFrame) -> dict[str, Any]:
-        work = df.copy(deep=True)
-        if work.empty:
-            return {"cases": 0, "vulnerable_population": [], "risk": pd.DataFrame()}
-        death = pd.to_numeric(work.get("Is_Meninggal", 0), errors="coerce").fillna(0)
-        geo = [c for c in ["Provinsi", "Kabupaten", "Kecamatan", "Desa/Kelurahan"] if c in work.columns]
-        if geo:
-            risk = work.assign(_death=death).groupby(geo, dropna=False).agg(
-                Total_Kasus=(geo[-1], "size"), Meninggal=("_death", "sum")
-            ).reset_index()
-            risk["CFR (%)"] = (risk["Meninggal"] / risk["Total_Kasus"].replace(0, pd.NA) * 100).fillna(0).round(2)
-            risk = hitung_risk_stratification(risk)
-        else:
-            risk = pd.DataFrame()
-        epi = pd.DataFrame()
-        if "Tanggal Sakit" in work.columns:
-            dates = pd.to_datetime(work["Tanggal Sakit"], errors="coerce").dropna()
-            if not dates.empty:
-                epi = dates.dt.date.value_counts().sort_index().rename_axis("Tanggal Sakit").reset_index(name="Jumlah Kasus")
-                epi["Tanggal Sakit"] = pd.to_datetime(epi["Tanggal Sakit"])
-        return {
-            "cases": int(len(work)),
+    def analyze(self, df: pd.DataFrame, scope: QueryScope | None = None,
+                forecast_days: int = 14, include_ml: bool = False) -> dict[str, Any]:
+        """Produce the canonical SI-HIS analytical contract.
+
+        ML is additive and explicitly optional; descriptive, diagnostic and
+        surveillance analytics remain available without trained models.
+        """
+        prepared = self.prepare(df, scope)
+        work = prepared.dataframe
+        trias = analyze_trias(work)
+        epi = trias["time"]
+        mortality = analyze_mortality(work)
+        risk = analyze_risk(work)
+        ews = early_warning(epi)
+        forecast = holt_winters_forecast(epi, forecast_days)
+        spatial = run_dbscan(work)
+        epicenter = compute_epicenter(spatial)
+        stats_result = hitung_bivariat_lengkap(work) if len(work) >= 30 else {}
+
+        result = {
+            "overview": {
+                "total_cases": int(len(work)),
+                "provinces": int(work["Provinsi"].nunique()) if "Provinsi" in work else 0,
+                "districts": int(work["Kabupaten"].nunique()) if "Kabupaten" in work else 0,
+                "subdistricts": int(work["Kecamatan"].nunique()) if "Kecamatan" in work else 0,
+                "villages": int(work["Desa/Kelurahan"].nunique()) if "Desa/Kelurahan" in work else 0,
+            },
+            "person": trias["person"],
+            "place": trias["place"],
+            "time": epi,
+            "mortality": mortality,
             "risk": risk,
-            "vulnerable_population": identifikasi_vulnerable_profile(work),
-            "epidemic_curve": epi,
-            "ews": hitung_early_warning_score(epi) if not epi.empty else (None, None, None),
+            "risk_factors": stats_result,
+            "vulnerable": identifikasi_vulnerable_profile(work),
+            "ews": ews,
             "rt": hitung_effective_rt(epi) if not epi.empty else None,
             "waves": deteksi_gelombang(epi) if not epi.empty else [],
+            "forecast": forecast,
+            "spatial": spatial,
+            "epicenters": epicenter,
+            "provenance": {**prepared.provenance, "ml_enabled": bool(include_ml)},
         }
+        if include_ml:
+            result["ml"] = self.ml_train(work)
+        else:
+            result["ml"] = {"enabled": False, "message": "ML layer tidak dijalankan pada request ini."}
+        return result
 
     def ml_train(self, df: pd.DataFrame) -> dict[str, Any]:
-        """Return training contracts without mixing them into dashboard state."""
         return {
             "case_severity": train_case_severity(df),
             "klb": train_klb_prediction(df),
             "spatial": train_spatial_outbreak(df),
             "vulnerable": train_vulnerable_population(df),
         }
+
+
+# Backward-compatible alias for application and API consumers.
+SIHISIntelligenceEngine = IntelligenceEngine

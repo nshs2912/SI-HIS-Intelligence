@@ -94,6 +94,16 @@ st.sidebar.markdown("---")
 st.sidebar.metric("Kasus Aktif", f"{len(df_active):,}")
 st.sidebar.caption(f"Penyakit: **{sel_disease}**")
 
+# Dynamic disease context: keep the selected disease visible as the dashboard title.
+disease_context = sel_disease if sel_disease else "Semua Penyakit"
+st.markdown(
+    f"## 🦠 Dashboard Intelligence: {disease_context}"
+)
+st.caption(
+    f"Seluruh analisis di bawah mengikuti filter penyakit **{disease_context}**, "
+    f"wilayah, dan tingkat diagnosis yang dipilih."
+)
+
 def build_risk_table(df):
     if df.empty: return pd.DataFrame()
     work = df.copy()
@@ -116,7 +126,7 @@ def build_epi(df):
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs(["🚨 AI Prediction & Recommendation", "📊 Trias Epidemiologi (Detail)", "📈 Kurva Epidemik & Prediksi", "🗺️ Peta Spasial & AI DBSCAN", "🧪 Analisis Faktor Risiko", "🧠 ML Intelligence Engine"])
 
 with tab1:
-    st.markdown("## 🚨 AI Prediction & Recommendation")
+    st.markdown(f"## 🚨 AI Prediction & Recommendation — {disease_context}")
     st.caption("Situational Intelligence: profiling kerentanan, stratifikasi risiko wilayah, early warning, outlier, dan rekomendasi respons.")
     if df_active.empty: st.warning("Tidak ada data aktif sesuai filter.")
     else:
@@ -147,7 +157,7 @@ with tab1:
         for rec in recs: st.info("• "+rec)
 
 with tab2:
-    st.markdown("### 📊 Trias Epidemiologi — Person, Place, Time")
+    st.markdown(f"### 📊 Trias Epidemiologi — {disease_context} — Person, Place, Time")
     if df_active.empty: st.warning("Tidak ada data yang sesuai filter.")
     else:
         st.markdown("#### Place — Distribusi Wilayah"); place=df_active.groupby(["Provinsi","Kabupaten","Kecamatan","Desa/Kelurahan"]).size().reset_index(name="Jumlah Kasus"); st.dataframe(place.sort_values("Jumlah Kasus",ascending=False),use_container_width=True,hide_index=True)
@@ -163,7 +173,7 @@ with tab2:
         st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
 
 with tab3:
-    st.markdown("### 📈 Kurva Epidemik & Prediksi"); epi=build_epi(df_active)
+    st.markdown(f"### 📈 Kurva Epidemik & Prediksi — {disease_context}"); epi=build_epi(df_active)
     if epi.empty: st.warning("Data tanggal tidak tersedia.")
     else:
         if len(epi)>=7:
@@ -180,7 +190,7 @@ with tab3:
         if waves: st.markdown("#### 🌊 Deteksi Gelombang Epidemi"); st.dataframe(pd.DataFrame(waves),use_container_width=True,hide_index=True)
 
 with tab4:
-    st.markdown("### 🗺️ Peta Spasial & AI DBSCAN")
+    st.markdown(f"### 🗺️ Peta Spasial & AI DBSCAN — {disease_context}")
     if df_active.empty: st.warning("Tidak ada data aktif.")
     else:
         geo=df_active.dropna(subset=["Latitude","Longitude"]).copy()
@@ -196,7 +206,7 @@ with tab4:
             st_folium(m,width=None,height=550)
 
 with tab5:
-    st.markdown("### 🧪 Analisis Faktor Risiko")
+    st.markdown(f"### 🧪 Analisis Faktor Risiko — {disease_context}")
     if df_active.empty: st.warning("Tidak ada data aktif.")
     else:
         try:
@@ -211,7 +221,7 @@ with tab5:
         except Exception as exc: st.warning(f"Analisis bivariat tidak dapat dijalankan pada filter ini: {exc}")
 
 with tab6:
-    st.markdown("### 🧠 ML Intelligence Engine")
+    st.markdown(f"### 🧠 ML Intelligence Engine — {disease_context}")
     st.caption("ML menambah lapisan prediktif di atas analitik epidemiologi asli; tidak menggantikan Trias, EWS, DBSCAN, forecast, atau analisis faktor risiko.")
     ml1,ml2,ml3,ml4,ml5=st.tabs(["Severity","KLB","Spatial","Vulnerable","Forecasting"])
     with ml1:
@@ -272,6 +282,6 @@ with tab6:
             else: st.warning(res.get("message","Forecast gagal."))
         st.warning("⚠️ **Disclaimer Forecast:** Forecast adalah estimasi statistik berdasarkan pola historis dan asumsi model, bukan kepastian kejadian di masa depan. Intervensi, perubahan perilaku, mobilitas, musim, sistem pelaporan, dan kejadian eksternal dapat menyebabkan hasil aktual berbeda dari proyeksi.")
     st.markdown("### 🛡️ General AI/ML Governance")
-    st.info("Output ML SI-HIS merupakan decision-support. Model tidak boleh digunakan sebagai satu-satunya dasar keputusan klinis, penetapan KLB/wabah, atau tindakan kesehatan masyarakat tanpa verifikasi profesional. Model harus dievaluasi pada populasi dan periode yang relevan, dipantau terhadap perubahan data, dan melalui governance serta validasi yang sesuai sebelum penggunaan operasional.")
+    st.info("Output ML SI-HIS merupakan decision-support. Model tidak boleh digunakan sebagai satu-satunya dasar keputusan klinis, penetapan KLB/wabah, atau tindakan kesehatan masyarakat tanpa verifikasi profesional. Model harus dievaluasi pada populasi dan periode yang relevan, dipantau terhadap perubahan data, dan melalui governance serta validasi yang sesuai sebelum digunakan untuk keputusan operasional.")
 
 st.caption("SI-HIS Intelligence — ML adalah decision-support layer. Output prediktif memerlukan validasi epidemiologi/klinis dan governance sebelum digunakan untuk keputusan operasional.")

@@ -1,14 +1,12 @@
 """Regulatory KLB early-warning engine for SI-HIS.
 
-The legal basis is Permenkes No. 1 Tahun 2026 tentang Kejadian Luar Biasa,
-Wabah, dan Krisis Kesehatan (status: berlaku). The regulation requires KLB
-vigilance through early detection, epidemiological assessment and early
-warning. It does not make the SI-HIS algorithm a legal KLB declaration tool.
+Legal basis: Permenkes No. 1 Tahun 2026 tentang Kejadian Luar Biasa,
+Wabah, dan Krisis Kesehatan (status: berlaku). The regulation requires
+KLB vigilance through early detection, epidemiological assessment and
+early warning. The algorithm is not a legal KLB declaration tool.
 
-The quantitative criterion families below are implemented as a VERSIONED
-technical ruleset so they can be replaced/updated when Kemenkes issues or
-updates disease-specific technical guidance. They are intentionally not
-hard-coded as immutable law.
+Quantitative criterion families are versioned technical surveillance rules.
+They must be validated against applicable current disease-specific guidance.
 """
 from __future__ import annotations
 from dataclasses import dataclass, asdict
@@ -26,9 +24,10 @@ REGULATION = {
 }
 
 RULESET = {
-    "id": "SIHIS-KLB-LEGACY-8-CRITERIA-V1",
-    "version": "1.0",
-    "description": "Criterion families used by SI-HIS as a versioned operational surveillance ruleset; validate against applicable current technical guidance before regulatory use.",
+    "id": "SIHIS-KLB-LEGACY-8-CRITERIA-V2",
+    "version": "2.0",
+    "description": "Versioned operational KLB surveillance rules. The legacy eight criterion families are retained, with an additional absolute-CFR severity signal so a very high case-fatality proportion is never hidden by low case volume. Absolute CFR signal is an investigation trigger, not by itself a legal declaration of KLB.",
+    "absolute_cfr_signal_threshold_pct": 50.0,
 }
 
 @dataclass
@@ -56,20 +55,23 @@ def _period_counts(df, freq="D"):
     return dates.dt.to_period(freq).value_counts().sort_index().astype(float)
 
 
-def _cfr(df):
-    if df.empty:
-        return np.nan
-    death = pd.Series(0, index=df.index)
+def _death_series(df):
+    death = pd.Series(0, index=df.index, dtype=int)
     if "Is_Meninggal" in df.columns:
         death = pd.to_numeric(df["Is_Meninggal"], errors="coerce").fillna(0).astype(int)
     if "Status Penderita" in df.columns:
-        death = pd.Series(np.maximum(death, df["Status Penderita"].astype(str).str.lower().eq("meninggal").astype(int)), index=df.index)
-    return float(death.sum() / len(df) * 100)
+        status = df["Status Penderita"].astype(str).str.strip().str.lower().eq("meninggal").astype(int)
+        death = pd.Series(np.maximum(death, status), index=df.index)
+    return death
+
+
+def _cfr(df):
+    if df.empty:
+        return np.nan
+    return float(_death_series(df).sum() / len(df) * 100)
 
 
 def _criterion_1(df):
-    # Requires an explicit prior absence/new-emergence field. Never infer absence
-    # merely from the current dataset.
     cols = ["Penyakit_Baru", "New_Disease", "Emerging_Disease"]
     for c in cols:
         if c in df.columns:
@@ -129,8 +131,9 @@ def _criterion_6(df):
     if dates.empty or dates.max() - dates.min() < pd.Timedelta(days=365):
         return CriterionResult("C6", "CFR meningkat ≥50% dibanding periode sama sebelumnya", False, None, "≥50%", "Baseline satu tahun sebelumnya belum tersedia.", False)
     latest = dates.max().to_period("M")
-    cur_df = df[(pd.to_datetime(df["Tanggal Sakit"], errors="coerce").dt.to_period("M") == latest)]
-    prev_df = df[(pd.to_datetime(df["Tanggal Sakit"], errors="coerce").dt.to_period("M") == (latest - 12))]
+    date_col = pd.to_datetime(df["Tanggal Sakit"], errors="coerce")
+    cur_df = df[date_col.dt.to_period("M") == latest]
+    prev_df = df[date_col.dt.to_period("M") == (latest - 12)]
     cur_cfr, prev_cfr = _cfr(cur_df), _cfr(prev_df)
     if np.isnan(prev_cfr):
         return CriterionResult("C6", "CFR meningkat ≥50% dibanding periode sama sebelumnya", False, None, "≥50%", "CFR baseline tidak tersedia.", False)
@@ -139,7 +142,6 @@ def _criterion_6(df):
 
 
 def _criterion_7(df):
-    # Requires a denominator representing all new cases in the same population/time.
     for col in ["Total_Kasus_Baru", "Total_New_Cases"]:
         if col in df.columns:
             numerator = len(df)
@@ -151,7 +153,6 @@ def _criterion_7(df):
 
 
 def _criterion_8(df):
-    # Common-source food cluster needs explicit exposure information and >=2 cases.
     exposure_cols = [c for c in ["Sumber_Makanan", "Food_Source", "Paparan_Makanan"] if c in df.columns]
     if not exposure_cols:
         return CriterionResult("C8", "≥2 kasus dengan gejala sama/setara terkait sumber makanan", False, None, ">=2", "Field sumber makanan/paparan belum tersedia.", False)
@@ -161,6 +162,21 @@ def _criterion_8(df):
         return CriterionResult("C8", "≥2 kasus dengan gejala sama/setara terkait sumber makanan", False, 0, ">=2", "Tidak ada sumber makanan yang dapat dianalisis.")
     top = counts.iloc[0]
     return CriterionResult("C8", "≥2 kasus dengan gejala sama/setara terkait sumber makanan", top >= 2, int(top), ">=2", f"Sumber makanan terbanyak memiliki {int(top)} kasus; hubungan epidemiologis masih memerlukan investigasi.")
+
+
+def _criterion_9_absolute_cfr(df):
+    """High CFR is an immediate severity/mortality signal, separate from C6 trend."""
+    if df.empty:
+        return CriterionResult("C9", "CFR absolut ≥50% — sinyal kematian bermakna", False, None, "≥50%", "Tidak ada kasus untuk menghitung CFR.", False)
+    cases = len(df)
+    deaths = int(_death_series(df).sum())
+    cfr = _cfr(df)
+    triggered = bool(cfr >= RULESET["absolute_cfr_signal_threshold_pct"])
+    note = "CFR absolut sangat tinggi; lakukan verifikasi definisi kasus/outcome dan investigasi segera. Sinyal ini tidak otomatis menetapkan status KLB."
+    if cases < 20:
+        note += " Denominator kecil; interpretasi harus hati-hati karena satu kematian dapat mengubah CFR secara besar."
+    evidence = f"{deaths} meninggal dari {cases} kasus; CFR={cfr:.2f}%."
+    return CriterionResult("C9", "CFR absolut ≥50% — sinyal kematian bermakna", triggered, cfr, "≥50%", evidence, True, note)
 
 
 def evaluate_klb(df: pd.DataFrame, disease: str | None = None, geographic_scope: str = "Indonesia") -> dict[str, Any]:
@@ -173,13 +189,16 @@ def evaluate_klb(df: pd.DataFrame, disease: str | None = None, geographic_scope:
                 masks.append(work[c].astype(str).str.strip().eq(disease))
         if masks:
             mask = masks[0]
-            for m in masks[1:]: mask |= m
+            for m in masks[1:]:
+                mask |= m
             work = work.loc[mask].copy()
-    results = [_criterion_1(work), _criterion_2(work), _criterion_3(work), _criterion_4(work), _criterion_5(work), _criterion_6(work), _criterion_7(work), _criterion_8(work)]
+    results = [_criterion_1(work), _criterion_2(work), _criterion_3(work), _criterion_4(work), _criterion_5(work), _criterion_6(work), _criterion_7(work), _criterion_8(work), _criterion_9_absolute_cfr(work)]
     triggered = [r for r in results if r.triggered]
     insufficient = [r for r in results if not r.data_sufficient]
     if not triggered:
         status = "NO_SIGNAL" if not insufficient else "EARLY_WARNING_DATA_INCOMPLETE"
+    elif any(r.code == "C9" for r in triggered):
+        status = "INVESTIGATION_REQUIRED"
     elif len(triggered) == 1:
         status = "EARLY_WARNING"
     else:
@@ -193,5 +212,5 @@ def evaluate_klb(df: pd.DataFrame, disease: str | None = None, geographic_scope:
         "ruleset": RULESET,
         "scope": geographic_scope,
         "disease": disease or "Semua Penyakit",
-        "authority_note": "SI-HIS tidak menetapkan status KLB secara otomatis. Sinyal harus ditindaklanjuti dengan kajian/investigasi epidemiologis dan validasi otoritas sesuai kewenangan.",
+        "authority_note": "SI-HIS tidak menetapkan status KLB secara otomatis. Sinyal kematian/CFR tinggi harus segera diverifikasi dan ditindaklanjuti dengan kajian/investigasi epidemiologis serta validasi otoritas sesuai kewenangan.",
     }

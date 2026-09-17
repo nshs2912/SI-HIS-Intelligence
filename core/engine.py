@@ -16,25 +16,11 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from .analytics import (
-    deteksi_bentuk_kurva,
-    deteksi_gelombang,
-    hitung_effective_rt,
-    identifikasi_vulnerable_profile,
-)
+from .analytics import deteksi_bentuk_kurva, deteksi_gelombang, hitung_effective_rt, identifikasi_vulnerable_profile
 from .epidemiology import analyze_mortality, analyze_risk, analyze_trias
-from .epidemiology.pipeline import (
-    classify_temporal_pattern_for_disease,
-    resolve_disease_profile,
-    validate_scope_for_special_analysis,
-)
+from .epidemiology.pipeline import classify_temporal_pattern_for_disease, resolve_disease_profile, validate_scope_for_special_analysis
 from .forecasting import holt_winters_forecast
-from .ml_engine import (
-    train_case_severity,
-    train_klb_prediction,
-    train_spatial_outbreak,
-    train_vulnerable_population,
-)
+from .ml_engine import train_case_severity, train_klb_prediction, train_spatial_outbreak, train_vulnerable_population
 from .scope import QueryScope, apply_scope, scope_label
 from .spatial import compute_epicenter, run_dbscan
 from .statistics import hitung_bivariat_lengkap
@@ -91,44 +77,47 @@ def _apply_period(df: pd.DataFrame, period_days: int) -> pd.DataFrame:
     return work.loc[work["Tanggal Sakit"].between(start, end)].copy()
 
 
+def _death_series(df: pd.DataFrame) -> pd.Series:
+    """Normalize mortality flags without relying on a possibly missing column."""
+    death = pd.Series(0, index=df.index, dtype=float)
+    if "Is_Meninggal" in df.columns:
+        death = pd.to_numeric(df["Is_Meninggal"], errors="coerce").fillna(0).astype(float)
+    if "Status Penderita" in df.columns:
+        status_death = df["Status Penderita"].astype(str).str.strip().str.lower().eq("meninggal").astype(float)
+        death = np.maximum(death, status_death)
+    return pd.Series(death, index=df.index, dtype=float)
+
+
 def _top10_diseases(df: pd.DataFrame) -> pd.DataFrame:
     """National descriptive table requested by the SI-HIS design."""
+    columns = ["NO.", "Nama Penyakit", "Jumlah Kasus", "CFR", "Kabupaten", "Provinsi"]
     if df.empty:
-        return pd.DataFrame(columns=["NO.", "Nama Penyakit", "Jumlah Kasus", "CFR", "Kabupaten", "Provinsi"])
+        return pd.DataFrame(columns=columns)
     work = df.copy()
     work["_disease"] = _disease_per_case(work)
-    death = pd.to_numeric(work.get("Is_Meninggal", 0), errors="coerce").fillna(0)
-    if "Status Penderita" in work.columns:
-        death = np.maximum(death, work["Status Penderita"].astype(str).str.lower().eq("meninggal").astype(int))
-    work["_death"] = death
+    work["_death"] = _death_series(work)
     rows: list[dict[str, Any]] = []
     for disease, group in work.groupby("_disease", dropna=False):
         if not disease or str(disease).lower() in NON_DISEASE_VALUES or disease == "Tidak Teridentifikasi":
             continue
         n = len(group)
         deaths = int(group["_death"].sum())
-        district = group["Kabupaten"].mode().iloc[0] if "Kabupaten" in group and not group["Kabupaten"].mode().empty else "-"
-        province = group["Provinsi"].mode().iloc[0] if "Provinsi" in group and not group["Provinsi"].mode().empty else "-"
-        # For the national top-10 table, show the district contributing the most cases.
+        district = "-"
+        province = "-"
         if "Kabupaten" in group:
             district_counts = group["Kabupaten"].value_counts(dropna=True)
             if not district_counts.empty:
                 district = district_counts.index[0]
-                province_rows = group.loc[group["Kabupaten"].eq(district), "Provinsi"] if "Provinsi" in group else pd.Series(dtype=object)
-                if not province_rows.empty:
-                    province = province_rows.mode().iloc[0]
-        rows.append({
-            "Nama Penyakit": str(disease),
-            "Jumlah Kasus": int(n),
-            "CFR": round(deaths / n * 100, 2) if n else 0.0,
-            "Kabupaten": district,
-            "Provinsi": province,
-        })
+                if "Provinsi" in group:
+                    province_rows = group.loc[group["Kabupaten"].eq(district), "Provinsi"]
+                    if not province_rows.empty and not province_rows.mode().empty:
+                        province = province_rows.mode().iloc[0]
+        rows.append({"Nama Penyakit": str(disease), "Jumlah Kasus": int(n), "CFR": round(deaths / n * 100, 2) if n else 0.0, "Kabupaten": district, "Provinsi": province})
+    if not rows:
+        return pd.DataFrame(columns=columns)
     out = pd.DataFrame(rows).sort_values(["Jumlah Kasus", "Nama Penyakit"], ascending=[False, True]).head(10).reset_index(drop=True)
-    if out.empty:
-        return pd.DataFrame(columns=["NO.", "Nama Penyakit", "Jumlah Kasus", "CFR", "Kabupaten", "Provinsi"])
     out.insert(0, "NO.", np.arange(1, len(out) + 1))
-    return out
+    return out[columns]
 
 
 class IntelligenceEngine:
@@ -140,32 +129,24 @@ class IntelligenceEngine:
         return IntelligenceResult(
             scope=query_scope,
             dataframe=scoped,
-            provenance={
-                "engine": "SI-HIS Intelligence",
-                "scope": query_scope.to_dict(),
-                "scope_isolated": True,
-                "source_rows": int(len(df)),
-                "scoped_rows": int(len(scoped)),
-                "area": scope_label(query_scope),
-            },
+            provenance={"engine": "SI-HIS Intelligence", "scope": query_scope.to_dict(), "scope_isolated": True, "source_rows": int(len(df)), "scoped_rows": int(len(scoped)), "area": scope_label(query_scope)},
         )
 
     def descriptive(self, df: pd.DataFrame) -> dict[str, Any]:
         """National descriptive intelligence; deliberately independent of filters."""
         work = df.copy(deep=True)
-        disease = _disease_per_case(work)
-        work["_disease"] = disease
+        work["_disease"] = _disease_per_case(work)
         total = len(work)
+        deaths = int(_death_series(work).sum())
         sex = work["Jenis Kelamin"].value_counts(dropna=False).rename_axis("Jenis Kelamin").reset_index(name="Jumlah Kasus") if "Jenis Kelamin" in work else pd.DataFrame()
         age = pd.to_numeric(work["Umur"], errors="coerce") if "Umur" in work else pd.Series(dtype=float)
         age_bins = pd.cut(age, bins=[-1, 0, 4, 9, 14, 19, 24, 34, 44, 54, 64, 74, 84, np.inf], labels=["<1", "1-4", "5-9", "10-14", "15-19", "20-24", "25-34", "35-44", "45-54", "55-64", "65-74", "75-84", "≥85"], include_lowest=True)
         age_table = age_bins.value_counts(sort=False, dropna=False).rename_axis("Kelompok Umur").reset_index(name="Jumlah Kasus")
         province = work.groupby("Provinsi", dropna=False).size().reset_index(name="Jumlah Kasus").sort_values("Jumlah Kasus", ascending=False) if "Provinsi" in work else pd.DataFrame()
         district = work.groupby(["Provinsi", "Kabupaten"], dropna=False).size().reset_index(name="Jumlah Kasus").sort_values("Jumlah Kasus", ascending=False) if "Kabupaten" in work else pd.DataFrame()
-        deaths = pd.to_numeric(work.get("Is_Meninggal", 0), errors="coerce").fillna(0).sum()
         return {
             "mode": "descriptive",
-            "overview": {"total_cases": int(total), "deaths": int(deaths), "cfr": round(float(deaths / total * 100), 2) if total else 0.0},
+            "overview": {"total_cases": int(total), "deaths": deaths, "cfr": round(deaths / total * 100, 2) if total else 0.0},
             "top10_diseases": _top10_diseases(work),
             "disease_distribution": work["_disease"].value_counts().rename_axis("Nama Penyakit").reset_index(name="Jumlah Kasus"),
             "province_distribution": province,
@@ -189,26 +170,13 @@ class IntelligenceEngine:
             geographic_level = "Desa/Kelurahan"
         elif prepared.scope.kecamatan:
             geographic_level = "Kecamatan"
-        eligibility = validate_scope_for_special_analysis(
-            work,
-            prepared.scope.disease,
-            geographic_level,
-            minimum_cases=10,
-            minimum_days=14,
-        )
+        eligibility = validate_scope_for_special_analysis(work, prepared.scope.disease, geographic_level, minimum_cases=10, minimum_days=14)
         profile = resolve_disease_profile(prepared.scope.disease)
         common = {
-            "mode": "epidemiology",
-            "eligible": eligibility.eligible,
+            "mode": "epidemiology", "eligible": eligibility.eligible,
             "eligibility": {"reasons": eligibility.reasons, "warnings": eligibility.warnings},
             "scope": prepared.scope.to_dict(),
-            "overview": {
-                "total_cases": int(len(work)),
-                "provinces": int(work["Provinsi"].nunique()) if "Provinsi" in work else 0,
-                "districts": int(work["Kabupaten"].nunique()) if "Kabupaten" in work else 0,
-                "subdistricts": int(work["Kecamatan"].nunique()) if "Kecamatan" in work else 0,
-                "villages": int(work["Desa/Kelurahan"].nunique()) if "Desa/Kelurahan" in work else 0,
-            },
+            "overview": {"total_cases": int(len(work)), "provinces": int(work["Provinsi"].nunique()) if "Provinsi" in work else 0, "districts": int(work["Kabupaten"].nunique()) if "Kabupaten" in work else 0, "subdistricts": int(work["Kecamatan"].nunique()) if "Kecamatan" in work else 0, "villages": int(work["Desa/Kelurahan"].nunique()) if "Desa/Kelurahan" in work else 0},
             "disease_profile": profile.__dict__,
             "provenance": {**prepared.provenance, "analysis_mode": "disease_scoped_epidemiology", "ml_enabled": bool(include_ml)},
         }
@@ -225,33 +193,22 @@ class IntelligenceEngine:
             curve = deteksi_bentuk_kurva(epi, profile.name) if len(epi) >= 7 else None
         except Exception:
             curve = None
+        spatial = run_dbscan(work)
         common.update({
-            "person": trias["person"],
-            "place": trias["place"],
-            "time": epi,
-            "mortality": analyze_mortality(work),
-            "risk": analyze_risk(work),
+            "person": trias["person"], "place": trias["place"], "time": epi,
+            "mortality": analyze_mortality(work), "risk": analyze_risk(work),
             "risk_factors": hitung_bivariat_lengkap(work) if len(work) >= 30 else {"status": "insufficient_sample", "message": "Minimal 30 kasus untuk modul statistik ini."},
-            "vulnerable": identifikasi_vulnerable_profile(work),
-            "ews": early_warning(epi),
-            "rt": hitung_effective_rt(epi) if not epi.empty else None,
-            "waves": waves,
-            "forecast": holt_winters_forecast(epi, forecast_days),
-            "spatial": run_dbscan(work),
-            "epicenters": compute_epicenter(run_dbscan(work)),
-            "temporal_interpretation": temporal,
+            "vulnerable": identifikasi_vulnerable_profile(work), "ews": early_warning(epi),
+            "rt": hitung_effective_rt(epi) if not epi.empty else None, "waves": waves,
+            "forecast": holt_winters_forecast(epi, forecast_days), "spatial": spatial,
+            "epicenters": compute_epicenter(spatial), "temporal_interpretation": temporal,
             "epidemic_curve_classification": curve,
+            "ml": self.ml_train(work) if include_ml else {"enabled": False, "message": "ML layer tidak dijalankan pada request ini."},
         })
-        common["ml"] = self.ml_train(work) if include_ml else {"enabled": False, "message": "ML layer tidak dijalankan pada request ini."}
         return common
 
     def ml_train(self, df: pd.DataFrame) -> dict[str, Any]:
-        return {
-            "case_severity": train_case_severity(df),
-            "klb": train_klb_prediction(df),
-            "spatial": train_spatial_outbreak(df),
-            "vulnerable": train_vulnerable_population(df),
-        }
+        return {"case_severity": train_case_severity(df), "klb": train_klb_prediction(df), "spatial": train_spatial_outbreak(df), "vulnerable": train_vulnerable_population(df)}
 
 
 SIHISIntelligenceEngine = IntelligenceEngine

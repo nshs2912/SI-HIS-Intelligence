@@ -41,43 +41,43 @@ def test_spatial_cluster_and_epicenter_are_cluster_specific():
     assert {"Latitude", "Longitude", "Jumlah_Kasus"}.issubset(centers.columns)
 
 
-def test_descriptive_mode_requires_no_scope_and_returns_top10_contract():
+def test_all_disease_national_is_descriptive_only():
     df = get_cases(days=90, target_rows=500, seed=321)
-    result = SIHISIntelligenceEngine().analyze(df, mode="descriptive")
+    result = SIHISIntelligenceEngine().analyze(df, QueryScope(disease=None, period_days=90), mode="descriptive")
     assert result["mode"] == "descriptive"
     assert "top10_diseases" in result
-    assert list(result["top10_diseases"].columns) == ["NO.", "Nama Penyakit", "Jumlah Kasus", "CFR", "Kabupaten", "Provinsi"]
+    assert result["overview"]["total_cases"] == len(df)
 
 
-def test_special_analysis_rejected_without_disease_and_district():
+def test_all_disease_scoped_province_is_descriptive_only():
     df = get_cases(days=90, target_rows=500, seed=321)
-    result = SIHISIntelligenceEngine().analyze(df)
-    assert result["eligible"] is False
-    assert result["analysis_sections"]["risk_factors"] is None
-    assert result["analysis_sections"]["spatial"] is None
+    province = str(df["Provinsi"].dropna().iloc[0])
+    scoped = apply_scope(df, QueryScope(province=province))
+    result = SIHISIntelligenceEngine().descriptive(scoped)
+    assert result["overview"]["total_cases"] == len(scoped)
+    assert result["overview"]["cfr"] >= 0
 
 
-def test_special_analysis_rejected_for_all_diseases_even_with_district():
-    df = get_cases(days=90, target_rows=500, seed=321)
-    district = str(df["Kabupaten"].dropna().iloc[0])
-    result = SIHISIntelligenceEngine().analyze(df, QueryScope(district=district, disease="Semua Penyakit", period_days=14))
-    assert result["eligible"] is False
-    assert any("satu penyakit" in reason.lower() for reason in result["eligibility"]["reasons"])
-
-
-def test_special_analysis_allowed_with_disease_district_and_period():
+def test_specific_disease_national_can_run_epidemiology():
     df = get_cases(days=90, target_rows=500, seed=321)
     disease = str(df["Diagnosis Konfirm"].loc[df["Diagnosis Konfirm"].astype(str) != "Bukan"].iloc[0])
-    district = str(df["Kabupaten"].dropna().iloc[0])
-    scoped = df[df["Kabupaten"].astype(str).eq(district)].copy()
-    # The synthetic generator has multiple dates/diseases; select a district/disease
-    # combination with enough observations for the special-analysis contract.
-    disease_mask = False
-    for col in ["Diagnosis Konfirm", "Diagnosis Probabel", "Diagnosis Suspek"]:
-        disease_mask = disease_mask | scoped[col].astype(str).eq(disease)
-    scoped = scoped[disease_mask]
-    if len(scoped) >= 10 and pd.to_datetime(scoped["Tanggal Sakit"], errors="coerce").nunique() >= 14:
-        result = SIHISIntelligenceEngine().analyze(df, QueryScope(district=district, disease=disease, period_days=14))
-        assert result["eligible"] is True
-        assert result["temporal_interpretation"] is not None
-        assert result["time"] is not None
+    result = SIHISIntelligenceEngine().analyze(df, QueryScope(disease=disease, period_days=90), mode="epidemiology")
+    assert result["eligible"] is True
+    assert result["scope"]["district"] is None
+    assert result["disease_profile"]["name"] == disease
+
+
+def test_specific_disease_province_can_run_epidemiology():
+    df = get_cases(days=90, target_rows=500, seed=321)
+    province = str(df["Provinsi"].dropna().iloc[0])
+    disease = str(df["Diagnosis Konfirm"].loc[df["Diagnosis Konfirm"].astype(str) != "Bukan"].iloc[0])
+    result = SIHISIntelligenceEngine().analyze(df, QueryScope(province=province, disease=disease, period_days=90), mode="epidemiology")
+    assert result["eligible"] is True
+    assert result["scope"]["province"] == province
+
+
+def test_all_disease_is_not_eligible_for_epidemiology():
+    df = get_cases(days=90, target_rows=500, seed=321)
+    result = SIHISIntelligenceEngine().analyze(df, QueryScope(disease="Semua Penyakit", period_days=90), mode="epidemiology")
+    assert result["eligible"] is False
+    assert result["analysis_sections"]["spatial"] is None

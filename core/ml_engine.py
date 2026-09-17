@@ -1,72 +1,151 @@
-"""SI-HIS ML Engine: supervised ML + robust forecasting."""
+"""SI-HIS Machine Learning Engine v2.
+Supervised prediction, temporal validation, explainability and robust forecasting.
+Derived targets are explicitly demo labels unless a validated outcome is supplied.
+"""
 import numpy as np
 import pandas as pd
 from sklearn.compose import ColumnTransformer
-from sklearn.ensemble import RandomForestClassifier, RandomForestRegressor
+from sklearn.ensemble import RandomForestClassifier
 from sklearn.impute import SimpleImputer
+from sklearn.inspection import permutation_importance
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score, roc_auc_score, average_precision_score, mean_absolute_error, mean_squared_error
+from sklearn.metrics import (accuracy_score, average_precision_score, brier_score_loss,
+    f1_score, precision_score, recall_score, roc_auc_score, mean_absolute_error,
+    mean_squared_error, confusion_matrix)
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
+import joblib
 
-RANDOM_STATE=42
+RANDOM_STATE = 42
+SEVERITY_FEATURES = ['Umur','Jenis Kelamin','Pekerjaan','Status Imunisasi','Status Komorbid','Riwayat Perjalanan','Faktor Risiko Lain']
 
-def _split(df, target, features):
-    d=df[features+[target]].copy().dropna(subset=[target])
-    if len(d)<30 or d[target].nunique()<2:return None
-    # Temporal split when a date is available; otherwise deterministic holdout.
-    if 'Tanggal Sakit' in d.columns:
-        d['Tanggal Sakit']=pd.to_datetime(d['Tanggal Sakit'],errors='coerce')
-        d=d.sort_values('Tanggal Sakit'); cut=max(int(len(d)*.8),1); tr=d.iloc[:cut]; te=d.iloc[cut:]
-    else:
-        d=d.sample(frac=1,random_state=RANDOM_STATE); cut=max(int(len(d)*.8),1); tr=d.iloc[:cut]; te=d.iloc[cut:]
-    if len(te)==0 or te[target].nunique()<2: return None
-    Xtr=tr[features]; Xte=te[features]; ytr=tr[target].astype(int); yte=te[target].astype(int)
-    return Xtr,Xte,ytr,yte
+def _ensure_date(df):
+    d=df.copy()
+    if 'Tanggal Sakit' in d.columns: d['Tanggal Sakit']=pd.to_datetime(d['Tanggal Sakit'],errors='coerce')
+    return d
 
-def _classifier(df,target,features):
-    s=_split(df,target,features)
-    if s is None:return {'status':'error','message':'Data/target tidak cukup untuk supervised learning.'}
-    Xtr,Xte,ytr,yte=s; cats=[c for c in features if df[c].dtype=='object']; nums=[c for c in features if c not in cats]
-    prep=ColumnTransformer([('num',SimpleImputer(strategy='median'),nums),('cat',Pipeline([('imp',SimpleImputer(strategy='most_frequent')),('oh',OneHotEncoder(handle_unknown='ignore'))]),cats)])
-    model=Pipeline([('prep',prep),('model',RandomForestClassifier(n_estimators=300,min_samples_leaf=3,class_weight='balanced',random_state=RANDOM_STATE,n_jobs=-1))]); model.fit(Xtr,ytr); p=model.predict_proba(Xte)[:,1]; yhat=(p>=.5).astype(int)
-    out={'status':'ok','model':model,'roc_auc':roc_auc_score(yte,p),'pr_auc':average_precision_score(yte,p),'accuracy':accuracy_score(yte,yhat),'precision':precision_score(yte,yhat,zero_division=0),'recall':recall_score(yte,yhat,zero_division=0),'f1':f1_score(yte,yhat,zero_division=0),'feature_importance':pd.DataFrame({'Feature':features,'Importance':np.nan})}
-    return out
+def _temporal_split(df,target,features,date_col='Tanggal Sakit',test_size=.2):
+    cols=list(dict.fromkeys(features+[target]+([date_col] if date_col in df.columns else [])))
+    d=df[cols].copy().dropna(subset=[target])
+    if len(d)<40 or d[target].nunique()<2:return None
+    if date_col in d.columns and d[date_col].notna().sum()>=10: d=d.dropna(subset=[date_col]).sort_values(date_col)
+    else: d=d.sort_index()
+    cut=max(int(len(d)*(1-test_size)),1)
+    if cut>=len(d):return None
+    tr,te=d.iloc[:cut],d.iloc[cut:]
+    if tr[target].nunique()<2 or te[target].nunique()<2:return None
+    return tr[features],te[features],tr[target].astype(int),te[target].astype(int),tr,te
+
+def _build_classifier(features,model_type='rf'):
+    numeric=[c for c in features if c in ['Umur','Daily_Cases','Rolling7','Lag1','Lag7','Growth7','Lat','Lon','Neighbor_Cases','Density']]
+    categorical=[c for c in features if c not in numeric]; transformers=[]
+    if numeric: transformers.append(('num',SimpleImputer(strategy='median'),numeric))
+    if categorical: transformers.append(('cat',Pipeline([('imp',SimpleImputer(strategy='most_frequent')),('oh',OneHotEncoder(handle_unknown='ignore'))]),categorical))
+    prep=ColumnTransformer(transformers)
+    clf=LogisticRegression(max_iter=1200,class_weight='balanced',random_state=RANDOM_STATE) if model_type=='logistic' else RandomForestClassifier(n_estimators=400,min_samples_leaf=3,class_weight='balanced',random_state=RANDOM_STATE,n_jobs=-1)
+    return Pipeline([('prep',prep),('model',clf)])
+
+def _feature_importance(model,X,y,features):
+    try:
+        r=permutation_importance(model,X,y,n_repeats=8,random_state=RANDOM_STATE,scoring='average_precision')
+        return pd.DataFrame({'Feature':list(X.columns),'Importance':r.importances_mean,'Std':r.importances_std}).sort_values('Importance',ascending=False).reset_index(drop=True)
+    except Exception:return pd.DataFrame({'Feature':features,'Importance':np.nan,'Std':np.nan})
+
+def _train_classifier(df,target,features,label):
+    split=_temporal_split(df,target,features)
+    if split is None:return {'status':'error','message':f'Data/target {label} tidak cukup atau holdout temporal hanya memiliki satu kelas.'}
+    Xtr,Xte,ytr,yte,tr,te=split; model=_build_classifier(features); model.fit(Xtr,ytr); p=model.predict_proba(Xte)[:,1]; pred=(p>=.5).astype(int); tn,fp,fn,tp=confusion_matrix(yte,pred,labels=[0,1]).ravel()
+    metrics={'roc_auc':roc_auc_score(yte,p),'pr_auc':average_precision_score(yte,p),'accuracy':accuracy_score(yte,pred),'precision':precision_score(yte,pred,zero_division=0),'recall':recall_score(yte,pred,zero_division=0),'specificity':tn/(tn+fp) if tn+fp else np.nan,'f1':f1_score(yte,pred,zero_division=0),'brier':brier_score_loss(yte,p)}
+    return {'status':'ok','model':model,'features':features,'label':label,'metrics':metrics,**metrics,'feature_importance':_feature_importance(model,Xte,yte,features),'holdout_start':te['Tanggal Sakit'].min() if 'Tanggal Sakit' in te else None,'train_rows':len(tr),'test_rows':len(te),'positive_rate':float(yte.mean())}
+
+def _severity_target(df):
+    death=pd.to_numeric(df.get('Is_Meninggal',0),errors='coerce').fillna(0).astype(int); inpatient=df.get('Status Penderita',pd.Series('',index=df.index)).astype(str).str.lower().eq('rawat inap'); return ((death==1)|inpatient).astype(int)
 
 def train_case_severity(df):
-    d=df.copy(); d['Severity_Target']=((d.get('Is_Meninggal',0).astype(int)==1)|d.get('Status Penderita','').eq('Rawat Inap')).astype(int)
-    features=['Umur','Jenis Kelamin','Pekerjaan','Status Imunisasi','Status Komorbid','Riwayat Perjalanan','Faktor Risiko Lain']; return _classifier(d,'Severity_Target',features)
-def predict_case_severity(df,model): return _predict(df,model,'Severity_Risk')
+    d=df.copy(); d['Severity_Target']=_severity_target(d); return _train_classifier(d,'Severity_Target',SEVERITY_FEATURES,'case severity')
 
-def train_klb_prediction(df):
-    d=df.copy(); d['Tanggal Sakit']=pd.to_datetime(d['Tanggal Sakit'],errors='coerce'); g=d.groupby(['Desa/Kelurahan','Tanggal Sakit']).size().reset_index(name='Daily_Cases'); g['Rolling7']=g.groupby('Desa/Kelurahan')['Daily_Cases'].transform(lambda x:x.rolling(7,min_periods=1).sum()); g['Next7_Max']=g.groupby('Desa/Kelurahan')['Daily_Cases'].transform(lambda x:x.shift(-1).rolling(7,min_periods=1).sum()); g['KLB_Target']=(g['Next7_Max']>=5).astype(int); g['Lag1']=g.groupby('Desa/Kelurahan')['Daily_Cases'].shift(1); g['Lag7']=g.groupby('Desa/Kelurahan')['Daily_Cases'].shift(7); g['Growth7']=g['Rolling7']/g.groupby('Desa/Kelurahan')['Rolling7'].shift(7).replace(0,np.nan); return _classifier(g.fillna(0),'KLB_Target',['Daily_Cases','Rolling7','Lag1','Lag7','Growth7'])
-def predict_klb(df,model): return _predict(df,model,'KLB_Risk')
-
-def train_spatial_outbreak(df):
-    d=df.copy(); d['Tanggal Sakit']=pd.to_datetime(d['Tanggal Sakit'],errors='coerce'); g=d.groupby(['Desa/Kelurahan','Tanggal Sakit']).agg(Daily_Cases=('Nama','count'),Lat=('Latitude','mean'),Lon=('Longitude','mean')).reset_index(); g['Rolling7']=g.groupby('Desa/Kelurahan')['Daily_Cases'].transform(lambda x:x.rolling(7,min_periods=1).sum()); g['Next7']=g.groupby('Desa/Kelurahan')['Daily_Cases'].transform(lambda x:x.shift(-1).rolling(7,min_periods=1).sum()); g['Spatial_Target']=(g['Next7']>=max(5,g['Daily_Cases'].median()*2)).astype(int); g=g.replace([np.inf,-np.inf],np.nan).fillna(0); return _classifier(g,'Spatial_Target',['Daily_Cases','Rolling7','Lat','Lon'])
-def predict_spatial_outbreak(df,model): return _predict(df,model,'Spatial_Risk')
+def predict_case_severity(df,model):return _predict_generic(df,model,'Severity_Risk',SEVERITY_FEATURES)
 
 def train_vulnerable_population(df):
-    d=df.copy(); d['Vulnerable_Target']=((d.get('Is_Meninggal',0).astype(int)==1)|d.get('Status Penderita','').eq('Rawat Inap')).astype(int); features=['Umur','Jenis Kelamin','Pekerjaan','Status Imunisasi','Status Komorbid','Riwayat Perjalanan','Faktor Risiko Lain']; return _classifier(d,'Vulnerable_Target',features)
-def predict_vulnerable_population(df,model): return _predict(df,model,'Vulnerable_Risk')
+    d=df.copy(); d['Vulnerable_Target']=_severity_target(d); return _train_classifier(d,'Vulnerable_Target',SEVERITY_FEATURES,'vulnerable population')
 
-def _predict(df,model,name):
-    d=df.copy(); features=[c for c in ['Umur','Jenis Kelamin','Pekerjaan','Status Imunisasi','Status Komorbid','Riwayat Perjalanan','Faktor Risiko Lain','Daily_Cases','Rolling7','Lag1','Lag7','Growth7','Lat','Lon'] if c in d.columns and c in getattr(model.named_steps['prep'],'feature_names_in_',d.columns)]
-    if not features:
-        try: features=list(model.named_steps['prep'].feature_names_in_)
-        except Exception: return pd.DataFrame()
-    try:p=model.predict_proba(d[features])[:,1]
+def predict_vulnerable_population(df,model):return _predict_generic(df,model,'Vulnerable_Risk',SEVERITY_FEATURES)
+
+def _daily_panel(df):
+    d=_ensure_date(df).dropna(subset=['Tanggal Sakit','Desa/Kelurahan']).copy()
+    if d.empty:return pd.DataFrame()
+    rows=[]
+    for village,g in d.groupby('Desa/Kelurahan'):
+        dates=pd.date_range(g['Tanggal Sakit'].min().normalize(),g['Tanggal Sakit'].max().normalize(),freq='D'); s=g.set_index('Tanggal Sakit').resample('D').size().reindex(dates,fill_value=0)
+        lat=pd.to_numeric(g['Latitude'],errors='coerce').mean() if 'Latitude' in g else np.nan; lon=pd.to_numeric(g['Longitude'],errors='coerce').mean() if 'Longitude' in g else np.nan
+        x=pd.DataFrame({'Desa/Kelurahan':village,'Tanggal Sakit':dates,'Daily_Cases':s.values,'Lat':lat,'Lon':lon}); x['Rolling7']=x['Daily_Cases'].rolling(7,min_periods=7).sum(); x['Lag1']=x['Daily_Cases'].shift(1); x['Lag7']=x['Daily_Cases'].shift(7); x['Prev7']=x['Daily_Cases'].shift(1).rolling(7,min_periods=7).sum(); x['Growth7']=np.where(x['Prev7']>0,x['Rolling7']/x['Prev7']-1,np.nan); rows.append(x)
+    return pd.concat(rows,ignore_index=True)
+
+def _future_target(panel,threshold=None):
+    p=panel.copy();
+    if threshold is None:
+        raw=[]
+        for _,g in p.groupby('Desa/Kelurahan',sort=False):
+            v=g['Daily_Cases'].to_numpy(float); raw.extend([v[i+1:i+8].sum() for i in range(max(0,len(v)-7))])
+        threshold=max(5.0,float(np.nanquantile(raw,.75))) if raw else 5.0
+    future=[]
+    for _,g in p.groupby('Desa/Kelurahan',sort=False):
+        v=g['Daily_Cases'].to_numpy(float); future.extend([v[i+1:i+8].sum() if i<len(g)-7 else np.nan for i in range(len(g))])
+    p['Next7_Total']=future; p['Outbreak_Target']=(p['Next7_Total']>=threshold).astype('float'); p.attrs['derived_threshold']=threshold
+    return p.dropna(subset=['Next7_Total'])
+
+def train_klb_prediction(df):
+    p=_future_target(_daily_panel(df),None)
+    if p.empty:return {'status':'error','message':'Riwayat harian per desa belum cukup untuk label KLB 7 hari.'}
+    r=_train_classifier(p,'Outbreak_Target',['Daily_Cases','Rolling7','Lag1','Lag7','Growth7'],'KLB/outbreak 7-day'); r['derived_threshold']=p.attrs.get('derived_threshold',5); return r
+
+def _latest_village_features(df,spatial=False):
+    p=_daily_panel(df)
+    if p.empty:return pd.DataFrame()
+    latest=p.sort_values('Tanggal Sakit').groupby('Desa/Kelurahan',as_index=False).tail(1).copy()
+    if spatial:
+        coords=latest[['Lat','Lon']].to_numpy(float); dens=[]
+        for i,(lat,lon) in enumerate(coords):
+            if not np.isfinite(lat) or not np.isfinite(lon):dens.append(0);continue
+            dist=111.2*np.sqrt(((coords[:,0]-lat)*np.cos(np.radians(lat)))**2+(coords[:,1]-lon)**2); dens.append(float(np.sum((dist<=20)&np.isfinite(dist))-1))
+        latest['Density']=dens
+    return latest
+
+def train_spatial_outbreak(df):
+    p=_future_target(_daily_panel(df),None)
+    if p.empty:return {'status':'error','message':'Riwayat harian-spasial belum cukup untuk training.'}
+    p['Density']=0.0
+    r=_train_classifier(p,'Outbreak_Target',['Daily_Cases','Rolling7','Lag1','Lag7','Growth7','Lat','Lon','Density'],'spatial outbreak 7-day'); r['derived_threshold']=p.attrs.get('derived_threshold',5); return r
+
+def predict_klb(df,model):return _predict_generic(_latest_village_features(df),model,'KLB_Risk',['Daily_Cases','Rolling7','Lag1','Lag7','Growth7'])
+def predict_spatial_outbreak(df,model):return _predict_generic(_latest_village_features(df,True),model,'Spatial_Risk',['Daily_Cases','Rolling7','Lag1','Lag7','Growth7','Lat','Lon','Density'])
+
+def _predict_generic(df,model,name,features):
+    if df is None or df.empty:return pd.DataFrame()
+    use=[c for c in features if c in df.columns]
+    try:p=model.predict_proba(df[use])[:,1]
     except Exception:return pd.DataFrame()
-    out=d.copy(); out[name]=p; out[name+'_Level']=pd.cut(p,[-.01,.33,.66,1.01],labels=['LOW','MEDIUM','HIGH']); return out
+    out=df.copy(); out[name]=p; out[name+'_Level']=pd.cut(p,[-.01,.33,.66,1.01],labels=['LOW','MEDIUM','HIGH']).astype(str); return out.sort_values(name,ascending=False)
+
+def _fit_ets(y):return ExponentialSmoothing(y,trend='add',damped_trend=True,seasonal=None).fit(optimized=True)
+def _seasonal_naive(y,h,period=7):return np.repeat(y[-1],h) if len(y)<period else np.resize(y[-period:],h)
 
 def robust_forecast(df,forecast_days=14):
-    if len(df)<30:return {'status':'error','message':'Minimal 30 observasi harian untuk forecasting robust.'}
-    x=df.copy().sort_values('Tanggal Sakit'); x['Jumlah Kasus']=pd.to_numeric(x['Jumlah Kasus'],errors='coerce').fillna(0); y=x['Jumlah Kasus'].values.astype(float)
-    try: ets=ExponentialSmoothing(y,trend='add',damped_trend=True,seasonal=None).fit(optimized=True); f=np.maximum(ets.forecast(forecast_days),0)
-    except Exception: return {'status':'error','message':'ETS gagal di-fit.'}
-    # Simple backtest on last 20% as an objective check.
-    cut=max(int(len(y)*.8),14); train=y[:cut]; test=y[cut:]
-    try: bt=ExponentialSmoothing(train,trend='add',damped_trend=True,seasonal=None).fit(optimized=True).forecast(len(test)); mae=mean_absolute_error(test,np.maximum(bt,0)); rmse=np.sqrt(mean_squared_error(test,np.maximum(bt,0)))
-    except Exception: mae=rmse=np.nan
-    dates=pd.date_range(x['Tanggal Sakit'].max()+pd.Timedelta(days=1),periods=forecast_days); s=np.std(y-ets.fittedvalues); peak=int(np.argmax(f)); return {'status':'ok','forecast':f,'dates':dates,'lower':np.maximum(f-1.96*s,0),'upper':f+1.96*s,'peak_date':dates[peak],'peak_value':f[peak],'mae':mae,'rmse':rmse}
+    if df is None or len(df)<30:return {'status':'error','message':'Minimal 30 observasi harian untuk forecasting robust.'}
+    x=_ensure_date(df).sort_values('Tanggal Sakit').copy(); x['Jumlah Kasus']=pd.to_numeric(x['Jumlah Kasus'],errors='coerce').fillna(0); x=x.set_index('Tanggal Sakit').resample('D')['Jumlah Kasus'].sum().asfreq('D',fill_value=0); y=x.to_numpy(float); cut=max(int(len(y)*.8),14); train,test=y[:cut],y[cut:]; candidates={}
+    try:m=_fit_ets(train); candidates['ETS']=np.maximum(m.forecast(len(test)),0) if len(test) else np.array([])
+    except Exception:pass
+    candidates['SeasonalNaive7']=_seasonal_naive(train,len(test),7); candidates['Naive']=np.repeat(train[-1],len(test)); scores={k:mean_absolute_error(test,v) for k,v in candidates.items()} if len(test) else {}; valid={k:v for k,v in scores.items() if np.isfinite(v)}
+    if not valid:return {'status':'error','message':'Backtest forecasting gagal.'}
+    inv={k:1/max(v,1e-6) for k,v in valid.items()}; z=sum(inv.values()); weights={k:v/z for k,v in inv.items()}
+    try:ets_full=_fit_ets(y); f_ets=np.maximum(ets_full.forecast(forecast_days),0)
+    except Exception:ets_full=None; f_ets=np.repeat(y[-1],forecast_days)
+    preds={'ETS':f_ets,'SeasonalNaive7':_seasonal_naive(y,forecast_days,7),'Naive':np.repeat(y[-1],forecast_days)}; f=sum(weights.get(k,0)*preds[k] for k in preds); dates=pd.date_range(x.index.max()+pd.Timedelta(days=1),periods=forecast_days); fitted=ets_full.fittedvalues if ets_full is not None else np.repeat(y.mean(),len(y)); s=float(np.std(y-fitted)) if len(y)>1 else 0; best=min(valid,key=valid.get)
+    return {'status':'ok','forecast':np.maximum(f,0),'dates':dates,'lower':np.maximum(f-1.96*s,0),'upper':f+1.96*s,'peak_date':dates[int(np.argmax(f))],'peak_value':float(np.max(f)),'mae':float(valid[best]),'rmse':float(np.sqrt(np.mean((test-candidates[best])**2))) if len(test) else np.nan,'models':list(preds),'weights':weights,'backtest_mae':valid}
+
+def save_model(result,path):
+    if result and result.get('status')=='ok':joblib.dump(result['model'],path);return path
+    return None
+
+def load_model(path):return joblib.load(path)

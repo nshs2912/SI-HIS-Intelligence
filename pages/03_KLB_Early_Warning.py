@@ -5,6 +5,7 @@ import streamlit as st
 from core.analytics import generate_data_simulasi
 from core.engine import SIHISIntelligenceEngine
 from core.scope import QueryScope
+from core.surveillance import evaluate_klb
 
 st.set_page_config(page_title="SI-HIS — KLB Early Warning", page_icon="🚨", layout="wide")
 st.title("🚨 SI-HIS — Kewaspadaan Dini KLB")
@@ -13,7 +14,6 @@ st.caption("Regulatory Early Warning • TIME + PERSON + PLACE")
 engine = SIHISIntelligenceEngine()
 df = generate_data_simulasi().copy()
 
-# Disease selector is intentionally based on available data.
 diseases = set()
 for col in ["Diagnosis Konfirm", "Diagnosis Probabel", "Diagnosis Suspek"]:
     if col in df:
@@ -33,26 +33,11 @@ st.warning(
     "mendukung investigasi epidemiologis. SI-HIS **tidak menetapkan status KLB secara otomatis**."
 )
 
-if disease == "Semua Penyakit":
-    work = df.copy()
-else:
-    work = df.copy()
-    mask = pd.Series(False, index=work.index)
-    for col in ["Diagnosis Konfirm", "Diagnosis Probabel", "Diagnosis Suspek"]:
-        if col in work:
-            mask |= work[col].astype(str).str.strip().eq(disease)
-    work = work.loc[mask].copy()
+work = df.copy()
+if province != "Indonesia" and "Provinsi" in work:
+    work = work.loc[work["Provinsi"].astype(str).eq(province)].copy()
 
-klb = engine.analyze(
-    work,
-    scope=QueryScope(disease=None if disease == "Semua Penyakit" else disease, period_days=3650),
-    mode="epidemiology",
-).get("klb")
-
-if not klb:
-    st.error("KLB engine belum menghasilkan evaluasi.")
-    st.stop()
-
+klb = evaluate_klb(work, disease=None if disease == "Semua Penyakit" else disease, geographic_scope=province)
 status = klb["status"]
 status_label = {
     "NO_SIGNAL": "🟢 Tidak ditemukan sinyal berdasarkan data tersedia",

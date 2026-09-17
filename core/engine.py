@@ -1,8 +1,10 @@
 """Canonical SI-HIS intelligence engine.
 
-Two analytical modes:
-1. descriptive: any geographic scope + all diseases; descriptive only.
-2. epidemiology: one disease + any geographic scope for TIME + PERSON + PLACE.
+Analytical scope is determined by the selected disease/geography/time window
+and by data quality/statistical sufficiency. Descriptive scope does not mean
+"no intelligence": the engine should extract descriptive epidemiological
+signals automatically and downstream analytical modules run whenever their
+methodological prerequisites are satisfied.
 """
 from __future__ import annotations
 from dataclasses import dataclass
@@ -45,25 +47,25 @@ def _filter_disease(df,disease):
 
 def _apply_period(df,period_days):
     if df.empty or "Tanggal Sakit" not in df.columns:return df.copy()
-    work=df.copy(); work["Tanggal Sakit"]=pd.to_datetime(work["Tanggal Sakit"],errors="coerce"); dates=work["Tanggal Sakit"].dropna()
+    work=df.copy();work["Tanggal Sakit"]=pd.to_datetime(work["Tanggal Sakit"],errors="coerce");dates=work["Tanggal Sakit"].dropna()
     if dates.empty:return work.iloc[0:0].copy()
-    end=dates.max().normalize(); start=end-pd.Timedelta(days=max(1,int(period_days))-1)
+    end=dates.max().normalize();start=end-pd.Timedelta(days=max(1,int(period_days))-1)
     return work.loc[work["Tanggal Sakit"].between(start,end)].copy()
 
 def _death_series(df):
     death=pd.Series(0.0,index=df.index)
     if "Is_Meninggal" in df.columns:death=pd.to_numeric(df["Is_Meninggal"],errors="coerce").fillna(0).astype(float)
     if "Status Penderita" in df.columns:
-        status=df["Status Penderita"].astype(str).str.strip().str.lower().eq("meninggal").astype(float); death=pd.Series(np.maximum(death,status),index=df.index)
+        status=df["Status Penderita"].astype(str).str.strip().str.lower().eq("meninggal").astype(float);death=pd.Series(np.maximum(death,status),index=df.index)
     return death
 
 def _top10_diseases(df):
     columns=["NO.","Nama Penyakit","Jumlah Kasus","CFR","Kabupaten","Provinsi"]
     if df.empty:return pd.DataFrame(columns=columns)
-    work=df.copy(); work["_disease"]=_disease_per_case(work); work["_death"]=_death_series(work); rows=[]
+    work=df.copy();work["_disease"]=_disease_per_case(work);work["_death"]=_death_series(work);rows=[]
     for disease,group in work.groupby("_disease",dropna=False):
         if not disease or str(disease).lower() in NON_DISEASE_VALUES or disease=="Tidak Teridentifikasi":continue
-        n=len(group); deaths=int(group["_death"].sum()); district="-"; province="-"
+        n=len(group);deaths=int(group["_death"].sum());district="-";province="-"
         if "Kabupaten" in group:
             counts=group["Kabupaten"].value_counts(dropna=True)
             if not counts.empty:
@@ -74,51 +76,56 @@ def _top10_diseases(df):
         rows.append({"Nama Penyakit":str(disease),"Jumlah Kasus":n,"CFR":round(deaths/n*100,2) if n else 0.0,"Kabupaten":district,"Provinsi":province})
     out=pd.DataFrame(rows)
     if out.empty:return pd.DataFrame(columns=columns)
-    out=out.sort_values(["Jumlah Kasus","Nama Penyakit"],ascending=[False,True]).head(10).reset_index(drop=True); out.insert(0,"NO.",np.arange(1,len(out)+1)); return out[columns]
+    out=out.sort_values(["Jumlah Kasus","Nama Penyakit"],ascending=[False,True]).head(10).reset_index(drop=True);out.insert(0,"NO.",np.arange(1,len(out)+1));return out[columns]
 
 def _trias_summary(df,national_disease_df,disease,geographic_scope):
-    total=len(df); national_total=len(national_disease_df); summary=[]
+    total=len(df);national_total=len(national_disease_df);summary=[]
     if "Provinsi" in df.columns and total:
-        g=df.groupby("Provinsi",dropna=False).agg(Kasus=("Provinsi","size"),Meninggal=("_death","sum")).reset_index(); g["CFR"]=np.where(g["Kasus"]>0,g["Meninggal"]/g["Kasus"]*100,0)
-        top_cases=g.sort_values(["Kasus","Provinsi"],ascending=[False,True]).iloc[0]; top_cfr=g.sort_values(["CFR","Kasus"],ascending=[False,False]).iloc[0]
-        denominator=national_total if geographic_scope=="Indonesia" else total; share=top_cases["Kasus"]/denominator*100 if denominator else 0
+        g=df.groupby("Provinsi",dropna=False).agg(Kasus=("Provinsi","size"),Meninggal=("_death","sum")).reset_index();g["CFR"]=np.where(g["Kasus"]>0,g["Meninggal"]/g["Kasus"]*100,0)
+        top_cases=g.sort_values(["Kasus","Provinsi"],ascending=[False,True]).iloc[0];top_cfr=g.sort_values(["CFR","Kasus"],ascending=[False,False]).iloc[0];denominator=national_total if geographic_scope=="Indonesia" else total;share=top_cases["Kasus"]/denominator*100 if denominator else 0
         if geographic_scope=="Indonesia":summary.append(f"Kasus **{disease}** terbanyak berada di **{top_cases['Provinsi']}**, sebanyak **{int(top_cases['Kasus']):,} kasus** ({share:.2f}% dari seluruh kasus {disease} di Indonesia) dengan CFR **{top_cases['CFR']:.2f}%**.")
         else:summary.append(f"Dalam scope **{geographic_scope}**, kasus **{disease}** terbanyak berada di **{top_cases['Provinsi']}**, sebanyak **{int(top_cases['Kasus']):,} kasus** ({share:.2f}% dari kasus pada scope) dengan CFR **{top_cases['CFR']:.2f}%**.")
         if str(top_cfr["Provinsi"])!=str(top_cases["Provinsi"]):summary.append(f"CFR tertinggi bukan berada di wilayah dengan kasus terbanyak, melainkan di **{top_cfr['Provinsi']}**, sebesar **{top_cfr['CFR']:.2f}%** ({int(top_cfr['Meninggal'])} meninggal dari {int(top_cfr['Kasus'])} kasus).")
         else:summary.append(f"Wilayah dengan kasus terbanyak juga memiliki CFR tertinggi, yaitu **{top_cfr['CFR']:.2f}%**.")
     if "Umur" in df.columns and total:
-        age=pd.to_numeric(df["Umur"],errors="coerce"); bins=pd.cut(age,bins=[-np.inf,1,5,10,15,20,25,35,45,55,65,75,85,np.inf],labels=["<1 tahun","1-4 tahun","5-9 tahun","10-14 tahun","15-19 tahun","20-24 tahun","25-34 tahun","35-44 tahun","45-54 tahun","55-64 tahun","65-74 tahun","75-84 tahun","≥85 tahun"],right=False); ag=bins.value_counts(sort=False,dropna=True)
-        if not ag.empty:
-            a=ag.idxmax(); n=int(ag.max());summary.append(f"Distribusi umur terbesar terdapat pada kelompok **{a}**, sebanyak **{n:,} kasus ({n/total*100:.2f}% dari seluruh kasus {disease} pada scope analisis)**.")
+        age=pd.to_numeric(df["Umur"],errors="coerce");bins=pd.cut(age,bins=[-np.inf,1,5,10,15,20,25,35,45,55,65,75,85,np.inf],labels=["<1 tahun","1-4 tahun","5-9 tahun","10-14 tahun","15-19 tahun","20-24 tahun","25-34 tahun","35-44 tahun","45-54 tahun","55-64 tahun","65-74 tahun","75-84 tahun","≥85 tahun"],right=False);ag=bins.value_counts(sort=False,dropna=True)
+        if not ag.empty:a=ag.idxmax();n=int(ag.max());summary.append(f"Distribusi umur terbesar terdapat pada kelompok **{a}**, sebanyak **{n:,} kasus ({n/total*100:.2f}% dari seluruh kasus {disease} pada scope analisis)**.")
     if "Jenis Kelamin" in df.columns and total:
-        sex=df["Jenis Kelamin"].astype(str).value_counts(); parts=[f"**{idx} {int(val):,} kasus ({val/total*100:.2f}%)**" for idx,val in sex.items()]; summary.append("Distribusi jenis kelamin menunjukkan "+", ".join(parts)+".") if parts else None
+        sex=df["Jenis Kelamin"].astype(str).value_counts();parts=[f"**{idx} {int(val):,} kasus ({val/total*100:.2f}%)**" for idx,val in sex.items()];summary.append("Distribusi jenis kelamin menunjukkan "+", ".join(parts)+".") if parts else None
     top10=pd.DataFrame()
     if "Provinsi" in df.columns and total and geographic_scope=="Indonesia":
-        top10=df.groupby("Provinsi",dropna=False).size().reset_index(name="Jumlah Kasus").sort_values(["Jumlah Kasus","Provinsi"],ascending=[False,True]).head(10).reset_index(drop=True); top10.insert(0,"NO.",np.arange(1,len(top10)+1))
+        top10=df.groupby("Provinsi",dropna=False).size().reset_index(name="Jumlah Kasus").sort_values(["Jumlah Kasus","Provinsi"],ascending=[False,True]).head(10).reset_index(drop=True);top10.insert(0,"NO.",np.arange(1,len(top10)+1))
     return {"narrative":" ".join(summary),"top10_province":top10,"total_scope_cases":total,"national_disease_cases":national_total,"scope":geographic_scope}
 
 class IntelligenceEngine:
     def prepare(self,df,scope=None):
-        query_scope=(scope or QueryScope()).normalized(); scoped=apply_scope(df,query_scope); return IntelligenceResult(query_scope,scoped,{"engine":"SI-HIS Intelligence","scope":query_scope.to_dict(),"scope_isolated":True,"source_rows":len(df),"scoped_rows":len(scoped),"area":scope_label(query_scope)})
+        query_scope=(scope or QueryScope()).normalized();scoped=apply_scope(df,query_scope);return IntelligenceResult(query_scope,scoped,{"engine":"SI-HIS Intelligence","scope":query_scope.to_dict(),"scope_isolated":True,"source_rows":len(df),"scoped_rows":len(scoped),"area":scope_label(query_scope)})
     def descriptive(self,df):
-        work=df.copy(deep=True); work["_disease"]=_disease_per_case(work); total=len(work); deaths=int(_death_series(work).sum()); sex=work["Jenis Kelamin"].value_counts(dropna=False).rename_axis("Jenis Kelamin").reset_index(name="Jumlah Kasus") if "Jenis Kelamin" in work else pd.DataFrame(); age=pd.to_numeric(work["Umur"],errors="coerce") if "Umur" in work else pd.Series(dtype=float); bins=pd.cut(age,bins=[-1,0,4,9,14,19,24,34,44,54,64,74,84,np.inf],labels=["<1","1-4","5-9","10-14","15-19","20-24","25-34","35-44","45-54","55-64","65-74","75-84","≥85"],include_lowest=True); age_table=bins.value_counts(sort=False,dropna=False).rename_axis("Kelompok Umur").reset_index(name="Jumlah Kasus"); province=work.groupby("Provinsi",dropna=False).size().reset_index(name="Jumlah Kasus").sort_values("Jumlah Kasus",ascending=False) if "Provinsi" in work else pd.DataFrame(); district=work.groupby(["Provinsi","Kabupaten"],dropna=False).size().reset_index(name="Jumlah Kasus").sort_values("Jumlah Kasus",ascending=False) if "Kabupaten" in work else pd.DataFrame(); return {"mode":"descriptive","overview":{"total_cases":total,"deaths":deaths},"top10_diseases":_top10_diseases(work),"disease_distribution":work["_disease"].value_counts().rename_axis("Nama Penyakit").reset_index(name="Jumlah Kasus"),"province_distribution":province,"district_distribution":district,"sex_distribution":sex,"age_distribution":age_table,"provenance":{"engine":"SI-HIS Intelligence","analysis":"descriptive","scope_required":False}}
+        work=df.copy(deep=True);work["_disease"]=_disease_per_case(work);total=len(work);deaths=int(_death_series(work).sum());sex=work["Jenis Kelamin"].value_counts(dropna=False).rename_axis("Jenis Kelamin").reset_index(name="Jumlah Kasus") if "Jenis Kelamin" in work else pd.DataFrame();age=pd.to_numeric(work["Umur"],errors="coerce") if "Umur" in work else pd.Series(dtype=float);bins=pd.cut(age,bins=[-1,0,4,9,14,19,24,34,44,54,64,74,84,np.inf],labels=["<1","1-4","5-9","10-14","15-19","20-24","25-34","35-44","45-54","55-64","65-74","75-84","≥85"],include_lowest=True);age_table=bins.value_counts(sort=False,dropna=False).rename_axis("Kelompok Umur").reset_index(name="Jumlah Kasus");province=work.groupby("Provinsi",dropna=False).size().reset_index(name="Jumlah Kasus").sort_values("Jumlah Kasus",ascending=False) if "Provinsi" in work else pd.DataFrame();district=work.groupby(["Provinsi","Kabupaten"],dropna=False).size().reset_index(name="Jumlah Kasus").sort_values("Jumlah Kasus",ascending=False) if "Kabupaten" in work else pd.DataFrame()
+        disease_top=_top10_diseases(work)
+        narrative=[]
+        if total:narrative.append(f"Scope analisis mencakup **{total:,} kasus/kunjungan** dengan **{deaths:,} kasus meninggal**.")
+        if not disease_top.empty:
+            r=disease_top.iloc[0];narrative.append(f"Penyakit dengan beban kasus terbesar adalah **{r['Nama Penyakit']}**, sebanyak **{int(r['Jumlah Kasus']):,} kasus**, dengan CFR **{float(r['CFR']):.2f}%**.")
+        if not province.empty:
+            r=province.iloc[0];narrative.append(f"Wilayah dengan jumlah kasus terbesar adalah **{r['Provinsi']}**, sebanyak **{int(r['Jumlah Kasus']):,} kasus**.")
+        narrative.append("Distribusi ini merupakan gambaran deskriptif. Analisis lanjutan berjalan berdasarkan kecukupan data dan prasyarat metodologis masing-masing modul.")
+        return {"mode":"descriptive","overview":{"total_cases":total,"deaths":deaths},"top10_diseases":disease_top,"disease_distribution":work["_disease"].value_counts().rename_axis("Nama Penyakit").reset_index(name="Jumlah Kasus"),"province_distribution":province,"district_distribution":district,"sex_distribution":sex,"age_distribution":age_table,"narrative":" ".join(narrative),"provenance":{"engine":"SI-HIS Intelligence","analysis":"descriptive_intelligence","scope_required":False}}
     def analyze(self,df,scope=None,forecast_days=14,include_ml=False,mode="epidemiology"):
         if mode=="descriptive":return self.descriptive(df)
-        prepared=self.prepare(df,scope); base=_filter_disease(prepared.dataframe,prepared.scope.disease); work=_apply_period(base,prepared.scope.period_days)
-        if prepared.scope.puskesmas: geographic_level="Puskesmas"
-        elif prepared.scope.village: geographic_level="Desa/Kelurahan"
-        elif prepared.scope.kecamatan: geographic_level="Kecamatan"
-        elif prepared.scope.district: geographic_level="Kabupaten"
-        elif prepared.scope.province: geographic_level="Provinsi"
-        else: geographic_level="Indonesia"
-        eligibility=validate_scope_for_special_analysis(work,prepared.scope.disease,geographic_level,10,14); profile=resolve_disease_profile(prepared.scope.disease); common={"mode":"epidemiology","eligible":eligibility.eligible,"eligibility":{"reasons":eligibility.reasons,"warnings":eligibility.warnings},"scope":prepared.scope.to_dict(),"overview":{"total_cases":len(work),"provinces":work["Provinsi"].nunique() if "Provinsi" in work else 0,"districts":work["Kabupaten"].nunique() if "Kabupaten" in work else 0,"subdistricts":work["Kecamatan"].nunique() if "Kecamatan" in work else 0,"villages":work["Desa/Kelurahan"].nunique() if "Desa/Kelurahan" in work else 0},"disease_profile":profile.__dict__,"provenance":{**prepared.provenance,"analysis_mode":"disease_scoped_epidemiology","ml_enabled":bool(include_ml)}}
-        if not eligibility.eligible:common["message"]="Analisis epidemiologi khusus belum dijalankan karena scope/data belum memenuhi syarat.";return common
+        prepared=self.prepare(df,scope);base=_filter_disease(prepared.dataframe,prepared.scope.disease);work=_apply_period(base,prepared.scope.period_days)
+        if prepared.scope.puskesmas:geographic_level="Puskesmas"
+        elif prepared.scope.village:geographic_level="Desa/Kelurahan"
+        elif prepared.scope.kecamatan:geographic_level="Kecamatan"
+        elif prepared.scope.district:geographic_level="Kabupaten"
+        elif prepared.scope.province:geographic_level="Provinsi"
+        else:geographic_level="Indonesia"
+        eligibility=validate_scope_for_special_analysis(work,prepared.scope.disease,geographic_level,10,14);profile=resolve_disease_profile(prepared.scope.disease);common={"mode":"epidemiology","eligible":eligibility.eligible,"eligibility":{"reasons":eligibility.reasons,"warnings":eligibility.warnings},"scope":prepared.scope.to_dict(),"overview":{"total_cases":len(work),"provinces":work["Provinsi"].nunique() if "Provinsi" in work else 0,"districts":work["Kabupaten"].nunique() if "Kabupaten" in work else 0,"subdistricts":work["Kecamatan"].nunique() if "Kecamatan" in work else 0,"villages":work["Desa/Kelurahan"].nunique() if "Desa/Kelurahan" in work else 0},"disease_profile":profile.__dict__,"provenance":{**prepared.provenance,"analysis_mode":"disease_scoped_epidemiology","ml_enabled":bool(include_ml)}}
+        if not eligibility.eligible:common["message"]="Analisis belum dijalankan karena data/scope belum memenuhi syarat metodologis.";return common
         work=work.copy();work["_death"]=_death_series(work);trias=analyze_trias(work);epi=trias["time"];waves=deteksi_gelombang(epi) if not epi.empty else []
         try:curve=deteksi_bentuk_kurva(epi,profile.name) if len(epi)>=7 else None
         except Exception:curve=None
-        spatial=run_dbscan(work); national_disease_df=_filter_disease(df,prepared.scope.disease); trias_summary=_trias_summary(work,national_disease_df,profile.name,geographic_level)
-        # Put the narrative and Indonesia top-10 directly into the rendered PERSON block so the existing UI shows them without raw object dumps.
-        person=trias["person"].copy(); person["Resume TIME + PERSON + PLACE"]=trias_summary["narrative"]
+        spatial=run_dbscan(work);national_disease_df=_filter_disease(df,prepared.scope.disease);trias_summary=_trias_summary(work,national_disease_df,profile.name,geographic_level);person=trias["person"].copy();person["Resume TIME + PERSON + PLACE"]=trias_summary["narrative"]
         if not trias_summary["top10_province"].empty:person["10 Besar Wilayah — Provinsi"]=trias_summary["top10_province"]
         common.update({"person":person,"place":trias["place"],"trias_summary":trias_summary,"time":epi,"mortality":analyze_mortality(work),"risk":analyze_risk(work),"risk_factors":hitung_bivariat_lengkap(work) if len(work)>=30 else {"status":"insufficient_sample","message":"Minimal 30 kasus untuk modul statistik ini."},"vulnerable":identifikasi_vulnerable_profile(work),"ews":early_warning(epi),"rt":hitung_effective_rt(epi) if not epi.empty else None,"waves":waves,"forecast":holt_winters_forecast(epi,forecast_days),"spatial":spatial,"epicenters":compute_epicenter(spatial),"temporal_interpretation":classify_temporal_pattern_for_disease(profile,len(waves)),"epidemic_curve_classification":curve,"ml":self.ml_train(work) if include_ml else {"enabled":False,"message":"ML layer tidak dijalankan."}});return common
     def ml_train(self,df):return {"case_severity":train_case_severity(df),"klb":train_klb_prediction(df),"spatial":train_spatial_outbreak(df),"vulnerable":train_vulnerable_population(df)}

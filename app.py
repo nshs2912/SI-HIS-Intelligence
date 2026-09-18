@@ -847,6 +847,9 @@ def _render_ml_forecast(result):
 
 def _render_ml_epi_table(title, result, columns=None, max_rows=20):
     st.markdown(f'### {title}')
+    guidance = next((v for k,v in ML_MENU_GUIDANCE.items() if k.lower() in title.lower()), None)
+    if guidance:
+        st.info(guidance)
     if isinstance(result, pd.DataFrame):
         table=result
     elif isinstance(result, dict) and isinstance(result.get('table'), pd.DataFrame):
@@ -868,6 +871,9 @@ def _render_ml_epi_table(title, result, columns=None, max_rows=20):
 
 def _render_ml_epi_status(title, result, keys):
     st.markdown(f'### {title}')
+    guidance = next((v for k,v in ML_MENU_GUIDANCE.items() if k.lower() in title.lower()), None)
+    if guidance:
+        st.info(guidance)
     if not isinstance(result,dict):
         st.info('Belum tersedia.')
         return
@@ -888,7 +894,8 @@ def _render_ml_epi_status(title, result, keys):
 
 
 def _render_ml_disease_models(result):
-    st.markdown('### 11. Disease-Specific Growth Models')
+    st.markdown('### 13. Disease-Specific Growth Models')
+    st.info(ML_MENU_GUIDANCE['Disease-Specific'])
     if not isinstance(result,dict) or not result:
         st.info('Model spesifik penyakit belum tersedia.')
         return

@@ -132,6 +132,27 @@ def descriptive_narrative(result,label):
     parts.append('Temuan ini bersifat deskriptif; interpretasi risiko membutuhkan denominator populasi, definisi outcome, dan analisis epidemiologis lanjutan yang sesuai.')
     return ' '.join(parts)
 
+def build_priority_score(work,death_series):
+    """Composite burden/fatality priority at the finest available geographic level."""
+    if not isinstance(work,pd.DataFrame) or work.empty:
+        return pd.DataFrame()
+    level=None
+    for candidate in ['Desa/Kelurahan','Kecamatan','Kabupaten','Provinsi']:
+        if candidate in work.columns and work[candidate].notna().any():
+            level=candidate
+            break
+    if level is None:return pd.DataFrame()
+    tmp=pd.DataFrame({level:work[level].astype(str), '_death':pd.to_numeric(death_series,errors='coerce').fillna(0).astype(int)})
+    sg=tmp.groupby(level).agg(Kasus=(level,'size'),Meninggal=('_death','sum')).reset_index()
+    sg['CFR']=np.where(sg['Kasus']>0,sg['Meninggal']/sg['Kasus']*100,0)
+    max_cases=float(sg['Kasus'].max()) if not sg.empty else 0
+    max_cfr=float(sg['CFR'].max()) if not sg.empty else 0
+    sg['Burden Score']=np.where(max_cases>0,sg['Kasus']/max_cases*100,0).round(2)
+    sg['CFR Score']=np.where(max_cfr>0,sg['CFR']/max_cfr*100,0).round(2)
+    sg['Risk Score']=(0.5*sg['Burden Score']+0.5*sg['CFR Score']).round(2)
+    sg['Risk Level']=np.select([sg['Risk Score']>=60,sg['Risk Score']>=35],['HIGH','MEDIUM'],default='LOW')
+    return sg.sort_values(['Risk Score','Burden Score','CFR Score'],ascending=False).reset_index(drop=True)
+
 def epidemiology_master_narrative(result,label,disease):
     """Single expert epidemiology resume combining TIME + PERSON + PLACE + priority scoring."""
     df=result.get('analysis_dataframe')
@@ -191,17 +212,14 @@ def epidemiology_master_narrative(result,label,disease):
             top=g.index[0];n=int(g.iloc[0]);parts.append(f"**PLACE —** Konsentrasi kasus terbesar berada di **{top}**, sebanyak **{n:,} kasus ({n/total*100:.2f}% dari kasus pada scope)**.")
             if len(g)>1:
                 h=g.head(3);parts.append("Tiga wilayah dengan beban kasus terbesar: " + "; ".join([f"**{idx} {int(val):,} ({val/total*100:.2f}%)**" for idx,val in h.items()]) + ".")
-    # scoring
-    if 'Provinsi' in work.columns and total:
-        sg=work.groupby('Provinsi').size().to_frame('Kasus');sg['Meninggal']=work.groupby('Provinsi').apply(lambda x:int(death_series.loc[x.index].sum()),include_groups=False);sg['CFR']=np.where(sg['Kasus']>0,sg['Meninggal']/sg['Kasus']*100,0)
-        max_cases=float(sg['Kasus'].max()) if not sg.empty else 0;max_cfr=float(sg['CFR'].max()) if not sg.empty else 0
-        sg['Burden Score']=np.where(max_cases>0,sg['Kasus']/max_cases*100,0).round(2)
-        sg['CFR Score']=np.where(max_cfr>0,sg['CFR']/max_cfr*100,0).round(2)
-        sg['Risk Score']=(0.5*sg['Burden Score']+0.5*sg['CFR Score']).round(2)
-        sg['Risk Level']=np.select([sg['Risk Score']>=60,sg['Risk Score']>=35],['HIGH','MEDIUM'],default='LOW')
-        sg=sg.reset_index().sort_values(['Risk Score','Burden Score','CFR Score'],ascending=False)
+    # scoring: use the finest geographic level available, matching the drill-down.
+    sg=build_priority_score(work,death_series)
+    if not sg.empty:
         result['priority_score']=sg
-        parts.append(f"**Prioritas epidemiologis:** Burden Score tertinggi berada pada **{sg.iloc[0]['Provinsi']} ({sg.iloc[0]['Burden Score']:.2f})**; CFR Score tertinggi berada pada **{sg.sort_values('CFR Score',ascending=False).iloc[0]['Provinsi']} ({sg['CFR Score'].max():.2f})**. Skor ini adalah skor prioritas operasional relatif antarwilayah dalam scope, bukan ukuran risiko individual atau signifikansi statistik.")
+        level=sg.columns[0]
+        top_b=sg.iloc[0]
+        top_f=sg.sort_values('CFR Score',ascending=False).iloc[0]
+        parts.append(f"**Prioritas epidemiologis:** pada level **{level}**, Risk Score tertinggi berada di **{top_b[level]} ({top_b['Risk Score']:.2f}; {top_b['Risk Level']})**. Burden Score tertinggi berada di **{sg.sort_values('Burden Score',ascending=False).iloc[0][level]} ({sg['Burden Score'].max():.2f})**, sedangkan CFR Score tertinggi berada di **{top_f[level]} ({top_f['CFR Score']:.2f}; CFR {top_f['CFR']:.2f}%).** Skor adalah prioritas operasional relatif dalam scope, bukan risiko individual, signifikansi statistik, atau kriteria legal KLB.")
     parts.append("**Decision support:** berdasarkan gabungan TIME + PERSON + PLACE, SI-HIS mengidentifikasi pola yang ditemukan dalam data dan menyarankan Kemenkes/Dinkes melakukan kajian epidemiologi lebih mendalam pada wilayah/kelompok yang menjadi prioritas, termasuk penelusuran perubahan temporal, distribusi spasial, cluster/episentrum, outcome kematian, faktor risiko, dan kebutuhan penemuan kasus. Tujuannya adalah mempercepat intervensi yang tepat untuk menurunkan angka kesakitan dan kematian.")
     return " ".join(parts)
 
@@ -219,7 +237,6 @@ def ai_prediction_narrative(result,disease,label):
     total=int(result.get('overview',{}).get('total_cases',len(df) if isinstance(df,pd.DataFrame) else 0) or 0)
     deaths=int(result.get('overview',{}).get('deaths',0) or 0)
     cfr=(deaths/total*100) if total else 0
-    klb=result.get('klb',{}) if isinstance(result.get('klb',{}),dict) else {}
     ews=result.get('ews',{}) if isinstance(result.get('ews',{}),dict) else {}
     score=ews.get('ews_score',ews.get('score',ews.get('EWS')))
     trend=ews.get('trend_pct',ews.get('trend'))
@@ -237,6 +254,12 @@ def ai_prediction_narrative(result,disease,label):
         if rt_value is not None:metrics.append(f"Rₜ **{float(rt_value):.2f}**")
         parts.append("**Prediksi & early warning:** "+", ".join(metrics)+". Nilai tersebut dibaca bersama TIME + PERSON + PLACE dan tidak diperlakukan sebagai probabilitas KLB tanpa model probabilistik yang tervalidasi.")
     pri=result.get('priority_score')
+    if (not isinstance(pri,pd.DataFrame) or pri.empty) and isinstance(df,pd.DataFrame) and not df.empty:
+        ds=pd.to_numeric(df.get('Is_Meninggal',pd.Series(0,index=df.index)),errors='coerce').fillna(0)
+        if 'Status Penderita' in df.columns:
+            ds=pd.Series(np.maximum(ds,df['Status Penderita'].astype(str).str.lower().eq('meninggal').astype(int)),index=df.index)
+        pri=build_priority_score(df,ds)
+        if not pri.empty: result['priority_score']=pri
     if isinstance(pri,pd.DataFrame) and not pri.empty:
         p=pri.copy()
         risk_col='Risk Score' if 'Risk Score' in p.columns else None
@@ -245,7 +268,8 @@ def ai_prediction_narrative(result,disease,label):
             parts.append(f"**Risk stratification:** {len(high)} dari {len(p)} wilayah pada tabel prioritas memiliki Risk Score ≥60. Skor komposit merupakan alat prioritas relatif dalam scope, bukan risiko individual atau ambang hukum KLB.")
         top_b=p.sort_values('Burden Score',ascending=False).iloc[0]
         top_f=p.sort_values('CFR Score',ascending=False).iloc[0]
-        parts.append(f"**Beban kasus:** prioritas burden tertinggi pada **{top_b.get('Provinsi',top_b.get('Wilayah','-'))}** (Burden Score {float(top_b.get('Burden Score',0)):.2f}). **Fatalitas relatif:** tertinggi pada **{top_f.get('Provinsi',top_f.get('Wilayah','-'))}** (CFR Score {float(top_f.get('CFR Score',0)):.2f}).")
+        level=p.columns[0]
+        parts.append(f"**Beban kasus:** prioritas burden tertinggi pada **{top_b.get(level,'-')}** (Burden Score {float(top_b.get('Burden Score',0)):.2f}). **Fatalitas relatif:** tertinggi pada **{top_f.get(level,'-')}** (CFR Score {float(top_f.get('CFR Score',0)):.2f}; CFR {float(top_f.get('CFR',0)):.2f}%).")
     vuln=result.get('vulnerable')
     if isinstance(vuln,list) and vuln:
         v=pd.DataFrame(vuln)

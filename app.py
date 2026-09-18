@@ -242,12 +242,13 @@ else:
     result=engine.analyze(df_raw,scope=scope,include_ml=include_ml,mode='epidemiology');label=sel_kab if sel_kab!='Semua Kabupaten/Kota' else (sel_prov if sel_prov!='Semua Provinsi' else 'Indonesia');st.markdown(f'## 🧬 Analisis Epidemiologi — {sel_disease}');st.caption(f'Scope: **{sel_disease} — {label}** | TIME + PERSON + PLACE')
     if not result.get('eligible',False):st.warning('Analisis epidemiologi belum dapat dijalankan.');render_value(result.get('eligibility'));st.stop()
     total=int(result['overview']['total_cases']);mortality=result.get('mortality');deaths=int(mortality.get('deaths',mortality.get('meninggal',0)) or 0) if isinstance(mortality,dict) else 0;cfr=deaths/total*100 if total else 0;a,b,c=st.columns(3);a.metric(f'Total {sel_disease}',f'{total:,}');b.metric('Meninggal',f'{deaths:,}');c.metric('CFR — tingkat kematian akibat penyakit',f'{cfr:.2f}%')
+    # Navigation utama ditempatkan sebelum resume agar pengguna dapat memilih mode eksplorasi terlebih dahulu.
+    tabs=st.tabs(['🚨 AI Prediction & Recommendation','📊 Trias Epidemiologi (Detail)','📈 Kurva Epidemik & Prediksi','🗺️ Peta Spasial & AI DBSCAN','🧪 Analisis Faktor Risiko','🤖 Analisis ML'])
     st.markdown('### 🧠 Resume Epidemiologi Terintegrasi — TIME + PERSON + PLACE')
     show_resume(epidemiology_master_narrative(result,label,sel_disease),'tabel dan grafik analisis di bawah')
     if isinstance(result.get('priority_score'),pd.DataFrame):
         st.markdown('#### 🎯 Prioritas Epidemiologis — Burden Score & CFR Score')
         st.dataframe(result['priority_score'],use_container_width=True,hide_index=True)
-        tabs=st.tabs(['🚨 AI Prediction & Recommendation','📊 Trias Epidemiologi (Detail)','📈 Kurva Epidemik & Prediksi','🗺️ Peta Spasial & AI DBSCAN','🧪 Analisis Faktor Risiko','🤖 Analisis ML'])
     with tabs[0]:
         st.markdown('### 🚨 AI Prediction & Recommendation')
         klb=result.get('klb',{})

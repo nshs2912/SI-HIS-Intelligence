@@ -600,3 +600,96 @@ def train_disease_specific_growth_models(
                 "message": "Data penyakit belum mencapai minimal 60 baris untuk model disease-specific."
             }
     return results
+
+
+def build_person_time_place_features(
+    df: pd.DataFrame,
+    area_col: str = AREA_COL,
+) -> pd.DataFrame:
+    """Aggregate PERSON characteristics into each area-day observation."""
+    if df is None or df.empty or DATE_COL not in df.columns:
+        return pd.DataFrame()
+    d = build_case_level_derived_features(df)
+    d[DATE_COL] = pd.to_datetime(d[DATE_COL], errors="coerce")
+    d = d.dropna(subset=[DATE_COL])
+    if area_col not in d.columns:
+        d[area_col] = "Indonesia"
+    d[area_col] = d[area_col].fillna("Tidak Diketahui").astype(str)
+    d["_case"] = 1
+    agg = d.groupby([area_col, DATE_COL], as_index=False).agg(
+        Cases=("_case", "sum"),
+        Mean_Age=("Umur", "mean") if "Umur" in d.columns else ("_case", "mean"),
+        Age_65Plus=("Age_Risk_65Plus", "mean") if "Age_Risk_65Plus" in d.columns else ("_case", "mean"),
+        Comorbidity_Rate=("Comorbidity_Flag", "mean") if "Comorbidity_Flag" in d.columns else ("_case", "mean"),
+        Travel_Rate=("Travel_Flag", "mean") if "Travel_Flag" in d.columns else ("_case", "mean"),
+        Death_Rate=("Death_Flag", "mean") if "Death_Flag" in d.columns else ("_case", "mean"),
+    )
+    return agg
+
+
+def train_time_person_place_risk_model(
+    df: pd.DataFrame,
+    area_col: str = AREA_COL,
+    horizon_days: int = 7,
+    quantile: float = 0.75,
+    min_rows: int = 80,
+) -> dict:
+    """Train a transparent TIME + PERSON + PLACE near-term burden model."""
+    ptp = build_person_time_place_features(df, area_col)
+    if ptp.empty:
+        return {"status": "error", "message": "Fitur TIME+PERSON+PLACE belum tersedia."}
+    temporal = build_temporal_features(ptp[[area_col, DATE_COL, "Cases"]], area_col)
+    person_cols = [c for c in [
+        area_col, DATE_COL, "Mean_Age", "Age_65Plus",
+        "Comorbidity_Rate", "Travel_Rate", "Death_Rate"
+    ] if c in ptp.columns]
+    p = temporal.merge(ptp[person_cols], on=[area_col, DATE_COL], how="left")
+    future_parts = []
+    for area, g in p.groupby(area_col, sort=False):
+        x = g.sort_values(DATE_COL).copy()
+        x["Future_Total"] = sum(x["Cases"].shift(-i) for i in range(1, horizon_days + 1))
+        future_parts.append(x)
+    p = pd.concat(future_parts, ignore_index=True)
+    cutoff = p[DATE_COL].quantile(0.80)
+    train_future = p.loc[p[DATE_COL] <= cutoff, "Future_Total"].dropna()
+    if train_future.empty:
+        return {"status": "error", "message": "Target training TIME+PERSON+PLACE belum terbentuk."}
+    threshold = float(max(5.0, train_future.quantile(quantile)))
+    p["Target"] = np.where(p["Future_Total"].notna(), (p["Future_Total"] >= threshold).astype(int), np.nan)
+    features = [
+        "Cases", "Rolling7", "Rolling14", "Growth7", "Momentum", "Z7",
+        "Mean_Age", "Age_65Plus", "Comorbidity_Rate", "Travel_Rate", "Death_Rate"
+    ]
+    usable = p.dropna(subset=features + ["Target"]).sort_values(DATE_COL)
+    if len(usable) < min_rows or usable["Target"].nunique() < 2:
+        return {"status": "error", "message": "Observasi atau variasi target TIME+PERSON+PLACE belum cukup."}
+    cut = int(len(usable) * 0.80)
+    train, test = usable.iloc[:cut], usable.iloc[cut:]
+    if train["Target"].nunique() < 2 or test["Target"].nunique() < 2:
+        return {"status": "error", "message": "Temporal holdout TIME+PERSON+PLACE hanya memiliki satu kelas."}
+    model = Pipeline([
+        ("imputer", SimpleImputer(strategy="median")),
+        ("scale", StandardScaler()),
+        ("rf", RandomForestClassifier(
+            n_estimators=500, min_samples_leaf=4, class_weight="balanced",
+            random_state=42, n_jobs=-1,
+        )),
+    ])
+    model.fit(train[features], train["Target"])
+    proba = model.predict_proba(test[features])[:, 1]
+    return {
+        "status": "ok",
+        "model": model,
+        "features": features,
+        "metrics": {
+            "roc_auc": float(roc_auc_score(test["Target"], proba)),
+            "pr_auc": float(average_precision_score(test["Target"], proba)),
+            "train_rows": int(len(train)),
+            "test_rows": int(len(test)),
+        },
+        "threshold_next7_total": threshold,
+        "horizon_days": horizon_days,
+        "target_definition": "Future area burden >= training-era historical quantile",
+        "dimensions": ["TIME", "PERSON", "PLACE"],
+        "legal_status": "not_KLB_definition",
+    }

@@ -76,6 +76,8 @@ The bundled dataset is **synthetic only**. It is intended to exercise the full n
    - spatial neighbour features
    - unsupervised vulnerability clustering
    - transparent continuous-signal prioritization score
+   - TIME + PERSON + PLACE risk model
+   - disease-specific growth-risk models
 
 ML output is decision support. It requires historical labelled data, temporal validation, calibration, external validation, drift monitoring, auditability and human oversight before operational use. Epidemiological ML signals are never legal KLB determinations; derived targets must be versioned and validated against applicable disease-specific rules.
 

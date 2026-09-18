@@ -192,11 +192,24 @@ def evaluate_klb(df: pd.DataFrame, disease: str | None = None, geographic_scope:
             for m in masks[1:]:
                 mask |= m
             work = work.loc[mask].copy()
-    results = [_criterion_1(work), _criterion_2(work), _criterion_3(work), _criterion_4(work), _criterion_5(work), _criterion_6(work), _criterion_7(work), _criterion_8(work), _criterion_9_absolute_cfr(work)]
+    death_count = int(_death_series(work).sum())
+    death_alert = CriterionResult(
+        "C0",
+        "Kematian terdeteksi — ALERT merah penyelidikan",
+        death_count > 0,
+        death_count,
+        ">0",
+        f"Ditemukan {death_count} kasus meninggal pada scope penyakit/wilayah yang dianalisis.",
+        True,
+        "Setiap kematian memicu ALERT merah SI-HIS untuk respons SKD dan penyelidikan epidemiologi. ALERT ini bukan penetapan status KLB."
+    )
+    results = [death_alert, _criterion_1(work), _criterion_2(work), _criterion_3(work), _criterion_4(work), _criterion_5(work), _criterion_6(work), _criterion_7(work), _criterion_8(work), _criterion_9_absolute_cfr(work)]
     triggered = [r for r in results if r.triggered]
     insufficient = [r for r in results if not r.data_sufficient]
     if not triggered:
         status = "NO_SIGNAL" if not insufficient else "EARLY_WARNING_DATA_INCOMPLETE"
+    elif any(r.code == "C0" for r in triggered):
+        status = "DEATH_ALERT"
     elif any(r.code == "C9" for r in triggered):
         status = "INVESTIGATION_REQUIRED"
     elif len(triggered) == 1:

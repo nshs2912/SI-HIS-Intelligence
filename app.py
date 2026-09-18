@@ -806,7 +806,7 @@ def _render_ml_epi_status(title, result, keys):
 
 
 def _render_ml_disease_models(result):
-    st.markdown('### 10. Disease-Specific Growth Models')
+    st.markdown('### 11. Disease-Specific Growth Models')
     if not isinstance(result,dict) or not result:
         st.info('Model spesifik penyakit belum tersedia.')
         return
@@ -880,18 +880,32 @@ def render_ml_report(ml):
         '8. Area Growth-Risk — Next 7 Days',
         epi.get('growth_risk'),
         [('threshold_next7_total','Threshold next 7 hari'),('horizon_days','Horizon (hari)')])
+    ranking=epi.get('continuous_ranking')
+    _render_ml_epi_table(
+        '9. Continuous Epidemiological Signal Ranking',
+        ranking,
+        ['Desa/Kelurahan','Continuous_Signal_Score','Signal_Level','Anomaly_Component','Change_Component','Growth_Component','Spatial_Component','Interpretation'],
+        30)
+    st.caption('Skor kontinu adalah alat prioritisasi transparan berbasis gabungan signal. Bukan probability terkalibrasi, diagnosis, atau status KLB.')
     growth=epi.get('growth_risk')
     if isinstance(growth,dict) and isinstance(growth.get('feature_importance'),pd.DataFrame):
         _render_ml_epi_table('Feature Importance — Growth Risk',growth.get('feature_importance'),None,15)
 
+    _render_ml_epi_table(
+        '10. Spatial Neighbour Intelligence',
+        epi.get('spatial_neighbors'),
+        ['Desa/Kelurahan','Neighbor_Areas','Neighbor_Cases'],
+        30)
+    st.caption('Fitur tetangga spasial menunjukkan konteks area sekitar berdasarkan radius/koordinat valid; bukan bukti transmisi atau sumber.')
+    
     _render_ml_epi_status(
-        '9. Spatio-Temporal Risk',
+        '11. Spatio-Temporal Risk',
         epi.get('spatiotemporal_risk'),
         [('threshold_next7_total','Threshold next 7 hari'),('horizon_days','Horizon (hari)')])
     st.caption('Dimensi: TIME + PLACE. Spatial neighbour features menggunakan area/koordinat valid; hasil dipakai sebagai prioritas verifikasi, bukan bukti sumber penularan.')
 
     _render_ml_epi_table(
-        '10. TIME + PERSON + PLACE Risk — Area-Day',
+        '12. TIME + PERSON + PLACE Risk — Area-Day',
         epi.get('time_person_place_risk'),
         None, 30)
     st.caption('Menggabungkan beban temporal dengan agregat karakteristik PERSON seperti umur, proporsi usia ≥65, komorbid, perjalanan, dan kematian pada area-hari. Pastikan definisi waktu prediksi mencegah leakage pada produksi.')
@@ -899,7 +913,7 @@ def render_ml_report(ml):
     _render_ml_disease_models(epi.get('disease_specific_growth'))
 
     vuln=epi.get('vulnerability_clustering')
-    st.markdown('### 12. Population Vulnerability Clustering')
+    st.markdown('### 14. Population Vulnerability Clustering')
     if isinstance(vuln,dict) and vuln.get('status')=='ok':
         st.caption(f"KMeans clustering menghasilkan {vuln.get('n_clusters','N/A')} cluster berdasarkan fitur populasi yang tersedia. Ini segmentasi surveillance, bukan label klinis.")
         _render_ml_epi_table('Profil Cluster',vuln.get('profiles'),None,20)
@@ -907,7 +921,7 @@ def render_ml_report(ml):
         st.warning(vuln.get('message','Clustering belum tersedia.') if isinstance(vuln,dict) else 'Clustering belum tersedia.')
 
     drift=epi.get('dataset_drift')
-    st.markdown('### 13. Validation & Dataset Drift')
+    st.markdown('### 15. Validation & Dataset Drift')
     if isinstance(drift,dict) and drift.get('status')=='ok':
         st.caption(f"Reference: {drift.get('reference_start')} → {drift.get('reference_end')} | Current: {drift.get('current_start')} → {drift.get('current_end')} | Feature drift review: {drift.get('drift_review_count',0)}")
         _render_ml_epi_table('PSI / Drift Screening',drift.get('table'),None,20)

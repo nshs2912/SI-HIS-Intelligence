@@ -50,15 +50,29 @@ def _chi_square(ct):
     except (ValueError,ZeroDivisionError,TypeError):return np.nan,np.nan
 
 
+def _or_by_level(ct):
+    """Crude OR versus the first observed exposure level, with 0.5 continuity correction."""
+    if ct is None or ct.empty or 0 not in ct.columns or 1 not in ct.columns:return pd.DataFrame()
+    levels=list(ct.index)
+    if len(levels)<2:return pd.DataFrame()
+    ref=levels[0];ref0=float(ct.loc[ref,0]);ref1=float(ct.loc[ref,1]);rows=[]
+    for level in levels:
+        if level==ref:
+            rows.append({"Kategori":level,"Referensi":ref,"cOR":1.0,"cOR Lower 95%":np.nan,"cOR Upper 95%":np.nan});continue
+        a=float(ct.loc[level,1])+.5;b=float(ct.loc[level,0])+.5;c=ref1+.5;d=ref0+.5
+        odds=(a*d)/(b*c);se=math.sqrt(1/a+1/b+1/c+1/d)
+        rows.append({"Kategori":level,"Referensi":ref,"cOR":odds,"cOR Lower 95%":math.exp(math.log(odds)-1.96*se),"cOR Upper 95%":math.exp(math.log(odds)+1.96*se)})
+    return pd.DataFrame(rows).round(4)
+
 def _binary_table(work,variable,target="Is_Konfirm"):
     if variable not in work.columns or target not in work.columns:
-        return {"crosstab":pd.DataFrame(),"chi2":np.nan,"p_value":np.nan,"status":"variable tidak tersedia"}
+        return {"crosstab":pd.DataFrame(),"chi2":np.nan,"p_value":np.nan,"or_by_group":pd.DataFrame(),"status":"variable tidak tersedia"}
     d=work.dropna(subset=[variable,target]).copy()
-    if d.empty:return {"crosstab":pd.DataFrame(),"chi2":np.nan,"p_value":np.nan,"status":"tidak ada observasi lengkap"}
+    if d.empty:return {"crosstab":pd.DataFrame(),"chi2":np.nan,"p_value":np.nan,"or_by_group":pd.DataFrame(),"status":"tidak ada observasi lengkap"}
     x=d[variable].astype(str);y=pd.to_numeric(d[target],errors="coerce")
-    ct=pd.crosstab(x,y);chi2,p=_chi_square(ct)
+    ct=pd.crosstab(x,y);chi2,p=_chi_square(ct);ors=_or_by_level(ct)
     status="ok" if pd.notna(p) else "outcome hanya memiliki satu kategori atau tabel tidak memenuhi syarat uji"
-    return {"crosstab":ct,"chi2":chi2,"p_value":p,"status":status}
+    return {"crosstab":ct,"chi2":chi2,"p_value":p,"or_by_group":ors,"status":status}
 
 
 def _age_analysis(work,target="Is_Konfirm"):

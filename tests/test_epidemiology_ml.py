@@ -2,6 +2,7 @@
 import numpy as np
 import pandas as pd
 
+from core.ml_validation import calibration_summary, dataset_drift_summary
 from core.epidemiology_ml import (
     build_temporal_features,
     detect_temporal_anomalies,
@@ -61,3 +62,15 @@ def test_ml_epi_smoke():
     assert growth["status"] in {"ok","error"}
     assert st["status"] in {"ok","error"}
     assert ptp["status"] in {"ok","error"}
+
+
+def test_validation_tools():
+    df = sample_data()
+    y = np.array([0, 1] * 60)
+    p = np.clip(np.linspace(0.05, 0.95, len(y)), 0.01, 0.99)
+    cal = calibration_summary(y, p)
+    drift = dataset_drift_summary(df, features=["Umur"])
+    assert cal["status"] == "ok"
+    assert "brier" in cal and "calibration_table" in cal
+    assert drift["status"] == "ok"
+    assert "table" in drift

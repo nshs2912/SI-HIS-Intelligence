@@ -434,6 +434,7 @@ def ai_prediction_narrative(result,disease,label):
     )
 
     # 5. PLACE
+    work['_death_tmp']=death
     place=[]
     for col,label2 in [('Provinsi','provinsi'),('Kabupaten','kabupaten/kota'),('Kecamatan','kecamatan'),('Desa/Kelurahan','desa/kelurahan')]:
         if col in work.columns:

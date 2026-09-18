@@ -21,6 +21,7 @@ def _fmt_number(v,digits=4):
 def show_resume(text,detail='tabel'):
     st.info(text or 'Belum tersedia interpretasi untuk scope/data ini.')
     st.caption(f"Untuk lebih detail bisa dilihat pada {detail} di bawah ini.")
+    st.warning('**DISCLAIMER PENTING**\\n\\nHasil analisis berfungsi sebagai **Decision Support System (DSS)**. Keputusan operasional tetap berada di bawah wewenang otoritas kesehatan.')
 
 def render_value(value,title=None):
     if title:st.markdown(f'#### {title}')

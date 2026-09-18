@@ -1,0 +1,359 @@
+"""SI-HIS Epidemiological ML extensions.
+
+This module adds ML-oriented epidemiological signal detection on top of the
+existing rule/statistical engine. It intentionally keeps derived labels and
+scores separate from legal KLB definitions.
+
+Capabilities:
+- anomaly detection with Isolation Forest on daily incidence features;
+- temporal change-point screening using rolling z-scores;
+- outbreak growth/risk modelling at area level;
+- spatial neighbour features;
+- population vulnerability clustering;
+- multi-signal ensemble for continuous epidemiological surveillance.
+
+All outputs are decision-support signals and require epidemiological validation.
+"""
+from __future__ import annotations
+
+from typing import Iterable, Optional
+import numpy as np
+import pandas as pd
+from sklearn.cluster import KMeans
+from sklearn.ensemble import IsolationForest, RandomForestClassifier
+from sklearn.impute import SimpleImputer
+from sklearn.metrics import average_precision_score, roc_auc_score
+from sklearn.pipeline import Pipeline
+from sklearn.preprocessing import StandardScaler
+
+
+DATE_COL = "Tanggal Sakit"
+AREA_COL = "Desa/Kelurahan"
+
+
+def _to_daily(df: pd.DataFrame, area_col: str = AREA_COL) -> pd.DataFrame:
+    if df is None or df.empty or DATE_COL not in df.columns:
+        return pd.DataFrame()
+    d = df.copy()
+    d[DATE_COL] = pd.to_datetime(d[DATE_COL], errors="coerce")
+    d = d.dropna(subset=[DATE_COL])
+    if area_col not in d.columns:
+        d[area_col] = "Indonesia"
+    d[area_col] = d[area_col].fillna("Tidak Diketahui").astype(str)
+    rows = []
+    for area, g in d.groupby(area_col, dropna=False):
+        s = g.set_index(DATE_COL).resample("D").size()
+        dates = pd.date_range(s.index.min().normalize(), s.index.max().normalize(), freq="D")
+        x = s.reindex(dates, fill_value=0).rename("Cases").to_frame()
+        x[area_col] = area
+        x.index.name = DATE_COL
+        rows.append(x.reset_index())
+    if not rows:
+        return pd.DataFrame()
+    return pd.concat(rows, ignore_index=True)
+
+
+def build_temporal_features(daily: pd.DataFrame, area_col: str = AREA_COL) -> pd.DataFrame:
+    if daily is None or daily.empty:
+        return pd.DataFrame()
+    d = daily.copy()
+    d[DATE_COL] = pd.to_datetime(d[DATE_COL], errors="coerce")
+    d["Cases"] = pd.to_numeric(d["Cases"], errors="coerce").fillna(0.0)
+    out = []
+    for area, g in d.sort_values(DATE_COL).groupby(area_col, sort=False):
+        x = g.copy()
+        x["Rolling7"] = x["Cases"].rolling(7, min_periods=7).sum()
+        x["Rolling14"] = x["Cases"].rolling(14, min_periods=14).sum()
+        x["Mean7"] = x["Cases"].rolling(7, min_periods=7).mean()
+        x["Std7"] = x["Cases"].rolling(7, min_periods=7).std()
+        x["Growth7"] = x["Rolling7"] / x["Rolling7"].shift(7).replace(0, np.nan) - 1.0
+        x["Lag1"] = x["Cases"].shift(1)
+        x["Lag7"] = x["Cases"].shift(7)
+        x["Momentum"] = x["Mean7"] - x["Mean7"].shift(7)
+        x["Z7"] = (x["Cases"] - x["Mean7"]) / x["Std7"].replace(0, np.nan)
+        out.append(x)
+    return pd.concat(out, ignore_index=True)
+
+
+def detect_temporal_anomalies(
+    df: pd.DataFrame,
+    area_col: str = AREA_COL,
+    contamination: float = 0.05,
+    random_state: int = 42,
+) -> pd.DataFrame:
+    """Screen daily area-level anomalies using Isolation Forest.
+
+    The anomaly score is a screening signal, not a disease/outbreak diagnosis.
+    """
+    daily = _to_daily(df, area_col)
+    feat = build_temporal_features(daily, area_col)
+    if feat.empty:
+        return feat
+    features = [c for c in ["Cases", "Rolling7", "Growth7", "Momentum", "Z7"] if c in feat.columns]
+    work = feat.dropna(subset=features).copy()
+    if len(work) < 30:
+        feat["Anomaly_Score"] = np.nan
+        feat["Anomaly_Flag"] = False
+        feat["Anomaly_Method"] = "IsolationForest_not_run_insufficient_data"
+        return feat
+    prep = Pipeline([
+        ("imputer", SimpleImputer(strategy="median")),
+        ("model", IsolationForest(
+            n_estimators=300,
+            contamination=float(np.clip(contamination, 0.01, 0.20)),
+            random_state=random_state,
+        )),
+    ])
+    x = work[features]
+    prep.fit(x)
+    score = prep.decision_function(x)
+    pred = prep.predict(x)
+    work["Anomaly_Score"] = -score
+    work["Anomaly_Flag"] = pred == -1
+    work["Anomaly_Method"] = "IsolationForest"
+    result = feat.copy()
+    result["Anomaly_Score"] = np.nan
+    result["Anomaly_Flag"] = False
+    result["Anomaly_Method"] = "IsolationForest"
+    result.loc[work.index, ["Anomaly_Score", "Anomaly_Flag"]] = work[["Anomaly_Score", "Anomaly_Flag"]]
+    return result
+
+
+def detect_change_points(
+    df: pd.DataFrame,
+    area_col: str = AREA_COL,
+    baseline_days: int = 14,
+    z_threshold: float = 2.0,
+) -> pd.DataFrame:
+    """Rolling baseline change screening with a pre-change window."""
+    daily = _to_daily(df, area_col)
+    if daily.empty:
+        return daily
+    out = []
+    for area, g in daily.groupby(area_col, sort=False):
+        x = g.sort_values(DATE_COL).copy()
+        x["Baseline_Mean"] = x["Cases"].shift(1).rolling(baseline_days, min_periods=baseline_days).mean()
+        x["Baseline_Std"] = x["Cases"].shift(1).rolling(baseline_days, min_periods=baseline_days).std()
+        x["Change_Z"] = (x["Cases"] - x["Baseline_Mean"]) / x["Baseline_Std"].replace(0, np.nan)
+        x["Change_Point_Flag"] = x["Change_Z"] >= float(z_threshold)
+        x["Change_Signal"] = np.where(
+            x["Change_Point_Flag"], "UPWARD_CHANGE", "NO_CHANGE_SIGNAL"
+        )
+        out.append(x)
+    return pd.concat(out, ignore_index=True)
+
+
+def _haversine_km(lat1, lon1, lat2, lon2):
+    r = 6371.0088
+    p1, p2 = np.radians(lat1), np.radians(lat2)
+    dlat = np.radians(lat2 - lat1)
+    dlon = np.radians(lon2 - lon1)
+    a = np.sin(dlat / 2) ** 2 + np.cos(p1) * np.cos(p2) * np.sin(dlon / 2) ** 2
+    return 2 * r * np.arctan2(np.sqrt(a), np.sqrt(1 - a))
+
+
+def build_spatial_neighbor_features(
+    df: pd.DataFrame,
+    radius_km: float = 10.0,
+    area_col: str = AREA_COL,
+) -> pd.DataFrame:
+    """Create neighbour case-density features from observed coordinates."""
+    if df is None or df.empty or not {"Latitude", "Longitude", area_col}.issubset(df.columns):
+        return pd.DataFrame()
+    d = df.copy()
+    d["Latitude"] = pd.to_numeric(d["Latitude"], errors="coerce")
+    d["Longitude"] = pd.to_numeric(d["Longitude"], errors="coerce")
+    d = d.dropna(subset=["Latitude", "Longitude"]).copy()
+    if d.empty:
+        return pd.DataFrame()
+    agg = d.groupby(area_col, as_index=False).agg(
+        Latitude=("Latitude", "mean"),
+        Longitude=("Longitude", "mean"),
+        Cases=(area_col, "size"),
+    )
+    coords = agg[["Latitude", "Longitude"]].to_numpy(float)
+    neighbor_count, neighbor_cases, mean_distance = [], [], []
+    for i, (lat, lon) in enumerate(coords):
+        dist = _haversine_km(lat, lon, coords[:, 0], coords[:, 1])
+        mask = (dist <= radius_km) & (np.arange(len(agg)) != i)
+        neighbor_count.append(int(mask.sum()))
+        neighbor_cases.append(float(agg.loc[mask, "Cases"].sum()))
+        vals = dist[mask]
+        mean_distance.append(float(vals.mean()) if len(vals) else np.nan)
+    agg["Neighbor_Areas"] = neighbor_count
+    agg["Neighbor_Cases"] = neighbor_cases
+    agg["Mean_Neighbor_Distance_KM"] = mean_distance
+    return agg
+
+
+def cluster_population_vulnerability(
+    df: pd.DataFrame,
+    features: Optional[Iterable[str]] = None,
+    n_clusters: int = 3,
+    min_rows: int = 30,
+) -> dict:
+    """Unsupervised vulnerability segmentation; requires explicit feature data."""
+    if df is None or df.empty:
+        return {"status": "error", "message": "Data kosong."}
+    default = ["Umur"]
+    if "Status Komorbid" in df.columns:
+        default.append("Status Komorbid")
+    if "Is_Meninggal" in df.columns:
+        default.append("Is_Meninggal")
+    features = list(features or default)
+    use = [c for c in features if c in df.columns]
+    if len(use) < 1 or len(df) < min_rows:
+        return {"status": "error", "message": f"Minimal {min_rows} baris dan feature valid diperlukan."}
+    work = df[use].copy()
+    for c in use:
+        if work[c].dtype == "object":
+            work[c] = pd.factorize(work[c].astype(str))[0]
+        work[c] = pd.to_numeric(work[c], errors="coerce")
+    work = work.replace([np.inf, -np.inf], np.nan).dropna()
+    if len(work) < min_rows:
+        return {"status": "error", "message": "Baris lengkap untuk clustering belum cukup."}
+    k = int(np.clip(n_clusters, 2, min(6, len(work) // 10)))
+    model = Pipeline([
+        ("imputer", SimpleImputer(strategy="median")),
+        ("scale", StandardScaler()),
+        ("kmeans", KMeans(n_clusters=k, n_init=20, random_state=42)),
+    ])
+    labels = model.fit_predict(work)
+    prof = work.copy()
+    prof["Cluster"] = labels
+    summary = prof.groupby("Cluster").agg(["mean", "count"]).round(3)
+    return {
+        "status": "ok",
+        "model": model,
+        "features": use,
+        "n_clusters": k,
+        "labels": pd.Series(labels, index=work.index, name="Vulnerability_Cluster"),
+        "profile": summary,
+        "note": "Cluster adalah segmentasi pola, bukan label klinis atau kausalitas.",
+    }
+
+
+def train_growth_risk_model(
+    df: pd.DataFrame,
+    area_col: str = AREA_COL,
+    horizon_days: int = 7,
+    quantile: float = 0.75,
+    min_rows: int = 60,
+) -> dict:
+    """Predict elevated near-term case burden using historical area-day data.
+
+    Target is explicitly a model-derived burden threshold, not a legal KLB label.
+    """
+    daily = _to_daily(df, area_col)
+    feat = build_temporal_features(daily, area_col)
+    if feat.empty:
+        return {"status": "error", "message": "Data temporal kosong."}
+    rows = []
+    for area, g in feat.groupby(area_col, sort=False):
+        x = g.sort_values(DATE_COL).copy()
+        x["Future_Total"] = x["Cases"].shift(-1).rolling(horizon_days, min_periods=horizon_days).sum().shift(-(horizon_days - 1))
+        rows.append(x)
+    p = pd.concat(rows, ignore_index=True)
+    future_vals = p["Future_Total"].dropna()
+    if future_vals.empty:
+        return {"status": "error", "message": "Future target belum terbentuk."}
+    threshold = float(max(5.0, future_vals.quantile(quantile)))
+    p["High_Burden_Target"] = (p["Future_Total"] >= threshold).astype(int)
+    feat_cols = ["Cases", "Rolling7", "Rolling14", "Growth7", "Momentum", "Z7"]
+    usable = p.dropna(subset=feat_cols + ["High_Burden_Target"]).copy()
+    if len(usable) < min_rows or usable["High_Burden_Target"].nunique() < 2:
+        return {"status": "error", "message": "Observasi atau variasi target belum cukup untuk training."}
+    usable = usable.sort_values(DATE_COL)
+    cut = int(len(usable) * 0.8)
+    train, test = usable.iloc[:cut], usable.iloc[cut:]
+    if train["High_Burden_Target"].nunique() < 2 or test["High_Burden_Target"].nunique() < 2:
+        return {"status": "error", "message": "Temporal holdout hanya memiliki satu kelas."}
+    model = Pipeline([
+        ("imputer", SimpleImputer(strategy="median")),
+        ("rf", RandomForestClassifier(
+            n_estimators=400,
+            min_samples_leaf=4,
+            class_weight="balanced",
+            random_state=42,
+            n_jobs=-1,
+        )),
+    ])
+    model.fit(train[feat_cols], train["High_Burden_Target"])
+    proba = model.predict_proba(test[feat_cols])[:, 1]
+    metrics = {
+        "roc_auc": float(roc_auc_score(test["High_Burden_Target"], proba)),
+        "pr_auc": float(average_precision_score(test["High_Burden_Target"], proba)),
+        "train_rows": int(len(train)),
+        "test_rows": int(len(test)),
+        "threshold_next7_total": threshold,
+    }
+    return {
+        "status": "ok",
+        "model": model,
+        "features": feat_cols,
+        "metrics": metrics,
+        "threshold": threshold,
+        "horizon_days": horizon_days,
+        "target_definition": "Future area case burden >= historical quantile threshold",
+        "legal_status": "not_KLB_definition",
+    }
+
+
+def predict_growth_risk(df: pd.DataFrame, model_result: dict, area_col: str = AREA_COL) -> pd.DataFrame:
+    if not model_result or model_result.get("status") != "ok":
+        return pd.DataFrame()
+    daily = _to_daily(df, area_col)
+    feat = build_temporal_features(daily, area_col)
+    if feat.empty:
+        return pd.DataFrame()
+    latest = feat.sort_values(DATE_COL).groupby(area_col, as_index=False).tail(1).copy()
+    cols = list(model_result["features"])
+    usable = latest.dropna(subset=[c for c in cols if c in latest.columns]).copy()
+    if usable.empty:
+        return usable
+    p = model_result["model"].predict_proba(usable[cols])[:, 1]
+    usable["Growth_Risk_7D"] = p
+    usable["Growth_Risk_Level"] = pd.cut(
+        p, bins=[-0.01, 0.33, 0.66, 1.01], labels=["LOW", "MEDIUM", "HIGH"]
+    ).astype(str)
+    return usable.sort_values("Growth_Risk_7D", ascending=False)
+
+
+def build_continuous_epidemiology_signals(
+    df: pd.DataFrame,
+    area_col: str = AREA_COL,
+) -> dict:
+    """Aggregate anomaly/change/spatial signals for event-driven surveillance."""
+    anomalies = detect_temporal_anomalies(df, area_col)
+    changes = detect_change_points(df, area_col)
+    spatial = build_spatial_neighbor_features(df, area_col=area_col)
+    alerts = []
+    if not anomalies.empty:
+        a = anomalies[anomalies["Anomaly_Flag"]].copy()
+        for _, row in a.iterrows():
+            alerts.append({
+                "signal_type": "TEMPORAL_ANOMALY",
+                "area": row.get(area_col),
+                "date": row.get(DATE_COL),
+                "severity": "HIGH",
+                "evidence": {"anomaly_score": float(row["Anomaly_Score"])},
+            })
+    if not changes.empty:
+        c = changes[changes["Change_Point_Flag"]].copy()
+        for _, row in c.iterrows():
+            alerts.append({
+                "signal_type": "UPWARD_CHANGE_POINT",
+                "area": row.get(area_col),
+                "date": row.get(DATE_COL),
+                "severity": "HIGH",
+                "evidence": {"change_z": float(row["Change_Z"])},
+            })
+    return {
+        "status": "ok",
+        "temporal_anomalies": anomalies,
+        "change_points": changes,
+        "spatial_neighbors": spatial,
+        "signals": alerts,
+        "signal_count": len(alerts),
+        "note": "Signal detection is not a legal KLB determination and requires validation.",
+    }

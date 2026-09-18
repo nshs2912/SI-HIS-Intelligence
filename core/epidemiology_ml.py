@@ -257,8 +257,18 @@ def train_growth_risk_model(
     future_vals = p["Future_Total"].dropna()
     if future_vals.empty:
         return {"status": "error", "message": "Future target belum terbentuk."}
-    threshold = float(max(5.0, future_vals.quantile(quantile)))
-    p["High_Burden_Target"] = (p["Future_Total"] >= threshold).astype(int)
+    # Threshold is estimated only from the training-era portion to avoid
+    # leaking future test-period information into the target definition.
+    cutoff_date = p[DATE_COL].quantile(0.80)
+    threshold_source = p.loc[p[DATE_COL] <= cutoff_date, "Future_Total"].dropna()
+    if threshold_source.empty:
+        threshold_source = future_vals
+    threshold = float(max(5.0, threshold_source.quantile(quantile)))
+    p["High_Burden_Target"] = np.where(
+        p["Future_Total"].notna(),
+        (p["Future_Total"] >= threshold).astype(int),
+        np.nan,
+    )
     feat_cols = ["Cases", "Rolling7", "Rolling14", "Growth7", "Momentum", "Z7"]
     usable = p.dropna(subset=feat_cols + ["High_Burden_Target"]).copy()
     if len(usable) < min_rows or usable["High_Burden_Target"].nunique() < 2:
@@ -440,3 +450,153 @@ def rank_areas_by_continuous_signal(
     out["Signal_Level"] = pd.cut(out["Continuous_Signal_Score"], [-0.01, 33.33, 66.67, 100.01], labels=["LOW","MEDIUM","HIGH"]).astype(str)
     out["Interpretation"] = "Prioritas screening berbasis gabungan signal; bukan probability, diagnosis, atau status KLB."
     return out.sort_values("Continuous_Signal_Score", ascending=False).reset_index(drop=True)
+
+
+def train_spatiotemporal_risk_model(
+    df: pd.DataFrame,
+    area_col: str = AREA_COL,
+    radius_km: float = 10.0,
+    horizon_days: int = 7,
+    quantile: float = 0.75,
+    min_rows: int = 80,
+) -> dict:
+    """Train an area-day risk model using TIME + PLACE features.
+
+    The target is elevated future burden, not legal KLB. Spatial inputs are
+    derived only from valid observed coordinates.
+    """
+    daily = _to_daily(df, area_col)
+    temporal = build_temporal_features(daily, area_col)
+    spatial = build_spatial_neighbor_features(df, radius_km=radius_km, area_col=area_col)
+    if temporal.empty:
+        return {"status": "error", "message": "Data temporal kosong."}
+    if spatial.empty:
+        return {"status": "error", "message": "Koordinat valid belum tersedia untuk fitur spasial."}
+    p = temporal.merge(
+        spatial[[area_col, "Neighbor_Areas", "Neighbor_Cases"]],
+        on=area_col, how="left"
+    )
+    future_parts = []
+    for area, g in p.groupby(area_col, sort=False):
+        x = g.sort_values(DATE_COL).copy()
+        x["Future_Total"] = sum(
+            x["Cases"].shift(-i) for i in range(1, horizon_days + 1)
+        )
+        future_parts.append(x)
+    p = pd.concat(future_parts, ignore_index=True)
+    cutoff = p[DATE_COL].quantile(0.80)
+    train_future = p.loc[p[DATE_COL] <= cutoff, "Future_Total"].dropna()
+    if train_future.empty:
+        return {"status": "error", "message": "Baseline target training belum terbentuk."}
+    threshold = float(max(5.0, train_future.quantile(quantile)))
+    p["Spatiotemporal_Target"] = np.where(
+        p["Future_Total"].notna(),
+        (p["Future_Total"] >= threshold).astype(int),
+        np.nan,
+    )
+    features = [
+        "Cases", "Rolling7", "Rolling14", "Growth7", "Momentum", "Z7",
+        "Neighbor_Areas", "Neighbor_Cases",
+    ]
+    usable = p.dropna(subset=features + ["Spatiotemporal_Target"]).sort_values(DATE_COL)
+    if len(usable) < min_rows or usable["Spatiotemporal_Target"].nunique() < 2:
+        return {"status": "error", "message": "Observasi atau variasi target TIME+PLACE belum cukup."}
+    cut = max(int(len(usable) * 0.80), 1)
+    train, test = usable.iloc[:cut], usable.iloc[cut:]
+    if train["Spatiotemporal_Target"].nunique() < 2 or test["Spatiotemporal_Target"].nunique() < 2:
+        return {"status": "error", "message": "Temporal holdout TIME+PLACE hanya memiliki satu kelas."}
+    model = Pipeline([
+        ("imputer", SimpleImputer(strategy="median")),
+        ("scale", StandardScaler()),
+        ("rf", RandomForestClassifier(
+            n_estimators=500, min_samples_leaf=4, class_weight="balanced",
+            random_state=42, n_jobs=-1,
+        )),
+    ])
+    model.fit(train[features], train["Spatiotemporal_Target"])
+    proba = model.predict_proba(test[features])[:, 1]
+    metrics = {
+        "roc_auc": float(roc_auc_score(test["Spatiotemporal_Target"], proba)),
+        "pr_auc": float(average_precision_score(test["Spatiotemporal_Target"], proba)),
+        "train_rows": int(len(train)),
+        "test_rows": int(len(test)),
+    }
+    return {
+        "status": "ok",
+        "model": model,
+        "features": features,
+        "metrics": metrics,
+        "threshold_next7_total": threshold,
+        "horizon_days": horizon_days,
+        "target_definition": "Future area burden >= training-era historical quantile",
+        "dimensions": ["TIME", "PLACE"],
+        "legal_status": "not_KLB_definition",
+    }
+
+
+def predict_spatiotemporal_risk(
+    df: pd.DataFrame, model_result: dict, area_col: str = AREA_COL,
+    radius_km: float = 10.0,
+) -> pd.DataFrame:
+    if not model_result or model_result.get("status") != "ok":
+        return pd.DataFrame()
+    temporal = build_temporal_features(_to_daily(df, area_col), area_col)
+    spatial = build_spatial_neighbor_features(df, radius_km=radius_km, area_col=area_col)
+    if temporal.empty or spatial.empty:
+        return pd.DataFrame()
+    latest = temporal.sort_values(DATE_COL).groupby(area_col, as_index=False).tail(1)
+    use = latest.merge(
+        spatial[[area_col, "Neighbor_Areas", "Neighbor_Cases"]],
+        on=area_col, how="left"
+    )
+    features = list(model_result["features"])
+    if any(c not in use.columns for c in features):
+        return pd.DataFrame()
+    use = use.dropna(subset=features).copy()
+    if use.empty:
+        return use
+    p = model_result["model"].predict_proba(use[features])[:, 1]
+    use["Spatiotemporal_Risk_7D"] = p
+    use["Spatiotemporal_Risk_Level"] = pd.cut(
+        p, [-0.01, 0.33, 0.66, 1.01],
+        labels=["LOW", "MEDIUM", "HIGH"]
+    ).astype(str)
+    return use.sort_values("Spatiotemporal_Risk_7D", ascending=False)
+
+
+def train_disease_specific_growth_models(
+    df: pd.DataFrame,
+    diseases: Optional[Iterable[str]] = None,
+    area_col: str = AREA_COL,
+) -> dict:
+    """Train independent growth-risk models per disease.
+
+    Disease-specific models prevent one disease's epidemic curve from being
+    treated as the temporal behaviour of another disease.
+    """
+    if df is None or df.empty:
+        return {}
+    disease_cols = ["Diagnosis Konfirm", "Diagnosis Probabel", "Diagnosis Suspek"]
+    values = set()
+    for col in disease_cols:
+        if col in df.columns:
+            values.update(
+                x for x in df[col].astype(str).str.strip().unique()
+                if x and x.lower() not in {"bukan", "tidak ada", "nan", "none"}
+            )
+    selected = list(diseases) if diseases else sorted(values)
+    results = {}
+    for disease in selected:
+        mask = pd.Series(False, index=df.index)
+        for col in disease_cols:
+            if col in df.columns:
+                mask |= df[col].astype(str).str.strip().eq(disease)
+        sub = df.loc[mask].copy()
+        if len(sub) >= 60:
+            results[str(disease)] = train_growth_risk_model(sub, area_col=area_col)
+        else:
+            results[str(disease)] = {
+                "status": "error",
+                "message": "Data penyakit belum mencapai minimal 60 baris untuk model disease-specific."
+            }
+    return results

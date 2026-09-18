@@ -20,10 +20,10 @@ c3.metric("Credentials", "Configured" if cfg["client_id"] and cfg["client_secret
 st.info("Credentials harus disimpan di Streamlit Secrets, bukan di source code/GitHub.")
 
 with st.expander("Konfigurasi yang dibutuhkan", expanded=not (cfg["client_id"] and cfg["client_secret"])):
-    st.code("""SATUSEHAT_ENVIRONMENT = \"sandbox\"
-SATUSEHAT_CLIENT_ID = \"<client-id>\"
-SATUSEHAT_CLIENT_SECRET = \"<client-secret>\"
-SATUSEHAT_ORGANIZATION_ID = \"<organization-ihs-number>\""" , language="toml")
+    st.code('''SATUSEHAT_ENVIRONMENT = "sandbox"
+SATUSEHAT_CLIENT_ID = "<client-id>"
+SATUSEHAT_CLIENT_SECRET = "<client-secret>"
+SATUSEHAT_ORGANIZATION_ID = "<organization-ihs-number>"''', language="toml")
 
 st.divider()
 st.subheader("1. Test OAuth2 Access Token")

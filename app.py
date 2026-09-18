@@ -830,7 +830,7 @@ def _render_ml_disease_models(result):
 
 def render_ml_report(ml):
     st.markdown('### 🧠 AI/ML Intelligence Report')
-    st.caption('Dua belas komponen ML/AI SI-HIS. Lima model utama lama tetap ditampilkan, dan komponen epidemiological intelligence tambahan sekarang ditampilkan sebagai bagian terpisah agar tidak tersembunyi di backend.')
+    st.caption('Seluruh komponen ML/AI SI-HIS ditampilkan. Lima model utama lama tetap dipertahankan, sedangkan komponen epidemiological intelligence tambahan dirender dari hasil backend agar tidak tersembunyi.')
     if not isinstance(ml,dict) or not ml:
         st.info('ML layer belum dijalankan.')
         return
@@ -864,10 +864,10 @@ def render_ml_report(ml):
     st.markdown('## 🔬 Epidemiological ML Intelligence — Extended Layer')
     st.caption('Komponen tambahan berikut sebelumnya sudah dihitung oleh backend tetapi belum dirender pada menu ML. Sekarang seluruh komponen utama ditampilkan. Semua output adalah signal/decision-support, bukan diagnosis, probabilitas terkalibrasi, atau penetapan legal KLB.')
 
-    signals=epi.get('continuous_signals',epi.get('signals',epi.get('continuous_signal')))
+    signals=epi.get('signals',[])
     _render_ml_epi_table(
         '6. Temporal Anomaly Detection — Isolation Forest',
-        signals,
+        epi.get('temporal_anomalies'),
         ['Tanggal Sakit','Desa/Kelurahan','Cases','Anomaly_Score','Anomaly_Flag'],
         30)
     _render_ml_epi_table(
@@ -911,6 +911,11 @@ def render_ml_report(ml):
     st.caption('Menggabungkan beban temporal dengan agregat karakteristik PERSON seperti umur, proporsi usia ≥65, komorbid, perjalanan, dan kematian pada area-hari. Pastikan definisi waktu prediksi mencegah leakage pada produksi.')
 
     _render_ml_disease_models(epi.get('disease_specific_growth'))
+
+    if signals:
+        st.markdown('### 7A. Continuous Signal Events')
+        st.dataframe(pd.DataFrame(signals).head(30),use_container_width=True,hide_index=True)
+        st.caption(f'Terdapat {len(signals)} event signal yang dibentuk dari anomaly/change-point. Signal ini memerlukan verifikasi epidemiologis.')
 
     vuln=epi.get('vulnerability_clustering')
     st.markdown('### 14. Population Vulnerability Clustering')

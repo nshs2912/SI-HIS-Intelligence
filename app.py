@@ -117,6 +117,78 @@ def descriptive_narrative(result,label):
     parts.append('Temuan ini bersifat deskriptif; interpretasi risiko membutuhkan denominator populasi, definisi outcome, dan analisis epidemiologis lanjutan yang sesuai.')
     return ' '.join(parts)
 
+def epidemiology_master_narrative(result,label,disease):
+    """Single expert epidemiology resume combining TIME + PERSON + PLACE + priority scoring."""
+    df=result.get('analysis_dataframe')
+    if not isinstance(df,pd.DataFrame) or df.empty:
+        return 'Data kasus pada scope analisis belum tersedia untuk membentuk resume epidemiologi terintegrasi.'
+    work=df.copy()
+    if 'Tanggal Sakit' in work.columns:
+        work['Tanggal Sakit']=pd.to_datetime(work['Tanggal Sakit'],errors='coerce')
+    total=len(work)
+    death_series=pd.to_numeric(work.get('Is_Meninggal',pd.Series(0,index=work.index)),errors='coerce').fillna(0)
+    if 'Status Penderita' in work.columns:
+        death_series=pd.Series(np.maximum(death_series,work['Status Penderita'].astype(str).str.lower().eq('meninggal').astype(int)),index=work.index)
+    deaths=int(death_series.sum());cfr=deaths/total*100 if total else 0
+    parts=[f"**Resume Epidemiologi — {disease} | {label}.** Berdasarkan **{total:,} kasus** pada scope analisis, ditemukan **{deaths:,} kasus meninggal** dengan **CFR {cfr:.2f}%** (tingkat kematian di antara kasus penyakit; bukan mortality rate populasi)."]
+    # TIME: latest 7 days vs preceding 7 days
+    if 'Tanggal Sakit' in work.columns and work['Tanggal Sakit'].notna().any():
+        end=work['Tanggal Sakit'].max().normalize()
+        cur_start=end-pd.Timedelta(days=6); prev_start=end-pd.Timedelta(days=13); prev_end=end-pd.Timedelta(days=7)
+        cur=work[work['Tanggal Sakit'].between(cur_start,end)]
+        prev=work[work['Tanggal Sakit'].between(prev_start,prev_end)]
+        cur_deaths=int(death_series.loc[cur.index].sum());prev_deaths=int(death_series.loc[prev.index].sum())
+        cur_cfr=cur_deaths/len(cur)*100 if len(cur) else 0;prev_cfr=prev_deaths/len(prev)*100 if len(prev) else 0
+        delta=(len(cur)-len(prev))/len(prev)*100 if len(prev) else None
+        direction='meningkat' if len(cur)>len(prev) else ('menurun' if len(cur)<len(prev) else 'relatif tetap')
+        parts.append(f"**TIME — 7 hari terakhir ({cur_start.date()}–{end.date()})** terdapat **{len(cur):,} kasus** dan **{cur_deaths:,} kematian**, CFR **{cur_cfr:.2f}%**; pada 7 hari sebelumnya ({prev_start.date()}–{prev_end.date()}) terdapat **{len(prev):,} kasus** dan **{prev_deaths:,} kematian**, CFR **{prev_cfr:.2f}%**. Secara temporal kasus **{direction}**" + (f" sebesar **{delta:.2f}%** dibandingkan 7 hari sebelumnya." if delta is not None else " dan baseline 7 hari sebelumnya belum tersedia."))
+        # short-term daily direction
+        daily=work.groupby(work['Tanggal Sakit'].dt.normalize()).size().sort_index()
+        if len(daily)>=3:
+            recent=daily.tail(3).tolist()
+            parts.append(f"Fluktuasi jangka pendek menunjukkan jumlah kasus pada tiga hari pengamatan terakhir **{', '.join(map(str,recent))} kasus/hari**. Pola ini digunakan untuk membaca perubahan cepat dan tidak disamakan dengan tren jangka panjang.")
+        span=(work['Tanggal Sakit'].max()-work['Tanggal Sakit'].min()).days
+        if span>=180:
+            monthly=work.groupby(work['Tanggal Sakit'].dt.to_period('M')).size()
+            if len(monthly)>=6:
+                parts.append(f"Pola musiman/tren jangka panjang dapat dieksplorasi karena tersedia sekitar **{span} hari** observasi; SI-HIS membandingkan distribusi bulanan dan perubahan antarperiode, sedangkan pola siklik beberapa tahun **belum dapat dinilai** tanpa seri waktu multi-tahun.")
+        else:
+            parts.append("Data yang tersedia belum cukup panjang untuk menyimpulkan pola musiman atau secular/cyclic trend; SI-HIS tidak akan mengklaim pola tersebut tanpa seri waktu yang memadai.")
+    # PERSON
+    person=[]
+    if 'Umur' in work.columns:
+        age=pd.to_numeric(work['Umur'],errors='coerce');bins=pd.cut(age,bins=[-np.inf,1,5,10,15,20,25,35,45,55,65,75,85,np.inf],labels=['<1 tahun','1-4 tahun','5-9 tahun','10-14 tahun','15-19 tahun','20-24 tahun','25-34 tahun','35-44 tahun','45-54 tahun','55-64 tahun','65-74 tahun','75-84 tahun','≥85 tahun'],right=False);vc=bins.value_counts(sort=False).dropna()
+        if not vc.empty:
+            k=vc.idxmax();n=int(vc.max());person.append(f"kelompok umur **{k}** sebanyak **{n:,} ({n/total*100:.2f}%)**")
+    if 'Jenis Kelamin' in work.columns:
+        vc=work['Jenis Kelamin'].astype(str).replace('nan','Tidak diketahui').value_counts(); 
+        if not vc.empty: person.append(f"jenis kelamin terbanyak **{vc.index[0]}** sebanyak **{int(vc.iloc[0]):,} ({vc.iloc[0]/total*100:.2f}%)**")
+    for col,label2 in [('Pekerjaan','pekerjaan'),('Status Imunisasi','status imunisasi'),('Merokok','merokok'),('Aktivitas Fisik','aktivitas fisik'),('Komorbid','komorbid')]:
+        if col in work.columns:
+            vc=work[col].astype(str).replace('nan','Tidak diketahui').value_counts()
+            if len(vc)>0 and vc.index[0]!='Tidak diketahui':
+                person.append(f"{label2} paling banyak: **{vc.index[0]}** ({int(vc.iloc[0]):,}; {vc.iloc[0]/total*100:.2f}%)")
+    if person: parts.append("**PERSON —** Pada periode pengamatan yang sama, distribusi kasus menunjukkan " + "; ".join(person) + ". Kelompok dominan merupakan gambaran distribusi kasus dan belum otomatis berarti kelompok tersebut memiliki risiko tertinggi tanpa denominator populasi.")
+    # PLACE + concentration
+    if 'Provinsi' in work.columns:
+        g=work.groupby('Provinsi').size().sort_values(ascending=False)
+        if not g.empty:
+            top=g.index[0];n=int(g.iloc[0]);parts.append(f"**PLACE —** Konsentrasi kasus terbesar berada di **{top}**, sebanyak **{n:,} kasus ({n/total*100:.2f}% dari kasus pada scope)**.")
+            if len(g)>1:
+                h=g.head(3);parts.append("Tiga wilayah dengan beban kasus terbesar: " + "; ".join([f"**{idx} {int(val):,} ({val/total*100:.2f}%)**" for idx,val in h.items()]) + ".")
+    # scoring
+    if 'Provinsi' in work.columns and total:
+        sg=work.groupby('Provinsi').size().to_frame('Kasus');sg['Meninggal']=work.groupby('Provinsi').apply(lambda x:int(death_series.loc[x.index].sum()),include_groups=False);sg['CFR']=np.where(sg['Kasus']>0,sg['Meninggal']/sg['Kasus']*100,0)
+        max_cases=float(sg['Kasus'].max()) if not sg.empty else 0;max_cfr=float(sg['CFR'].max()) if not sg.empty else 0
+        sg['Burden Score']=np.where(max_cases>0,sg['Kasus']/max_cases*100,0).round(2)
+        sg['CFR Score']=np.where(max_cfr>0,sg['CFR']/max_cfr*100,0).round(2)
+        sg=sg.reset_index().sort_values(['Burden Score','CFR Score'],ascending=False)
+        result['priority_score']=sg
+        parts.append(f"**Prioritas epidemiologis:** Burden Score tertinggi berada pada **{sg.iloc[0]['Provinsi']} ({sg.iloc[0]['Burden Score']:.2f})**; CFR Score tertinggi berada pada **{sg.sort_values('CFR Score',ascending=False).iloc[0]['Provinsi']} ({sg['CFR Score'].max():.2f})**. Skor ini adalah skor prioritas operasional relatif antarwilayah dalam scope, bukan ukuran risiko individual atau signifikansi statistik.")
+    parts.append("**Decision support:** berdasarkan gabungan TIME + PERSON + PLACE, SI-HIS mengidentifikasi pola yang ditemukan dalam data dan menyarankan Kemenkes/Dinkes melakukan kajian epidemiologi lebih mendalam pada wilayah/kelompok yang menjadi prioritas, termasuk penelusuran perubahan temporal, distribusi spasial, cluster/episentrum, outcome kematian, faktor risiko, dan kebutuhan penemuan kasus. Tujuannya adalah mempercepat intervensi yang tepat untuk menurunkan angka kesakitan dan kematian.")
+    return " ".join(parts)
+
+
 def ews_narrative(ews,rt):
     if not isinstance(ews,dict):return 'Data temporal belum cukup untuk membentuk Early Warning Score.'
     score=ews.get('ews_score',ews.get('score',ews.get('EWS')));trend=ews.get('trend_pct',ews.get('trend'));text='Early Warning membaca perubahan kasus terhadap periode pembanding. Skor SI-HIS adalah indikator kewaspadaan internal, bukan probabilitas KLB terkalibrasi.'
@@ -170,7 +242,12 @@ else:
     result=engine.analyze(df_raw,scope=scope,include_ml=include_ml,mode='epidemiology');label=sel_kab if sel_kab!='Semua Kabupaten/Kota' else (sel_prov if sel_prov!='Semua Provinsi' else 'Indonesia');st.markdown(f'## 🧬 Analisis Epidemiologi — {sel_disease}');st.caption(f'Scope: **{sel_disease} — {label}** | TIME + PERSON + PLACE')
     if not result.get('eligible',False):st.warning('Analisis epidemiologi belum dapat dijalankan.');render_value(result.get('eligibility'));st.stop()
     total=int(result['overview']['total_cases']);mortality=result.get('mortality');deaths=int(mortality.get('deaths',mortality.get('meninggal',0)) or 0) if isinstance(mortality,dict) else 0;cfr=deaths/total*100 if total else 0;a,b,c=st.columns(3);a.metric(f'Total {sel_disease}',f'{total:,}');b.metric('Meninggal',f'{deaths:,}');c.metric('CFR — tingkat kematian akibat penyakit',f'{cfr:.2f}%')
-    tabs=st.tabs(['🚨 AI Prediction & Recommendation','📊 Trias Epidemiologi (Detail)','📈 Kurva Epidemik & Prediksi','🗺️ Peta Spasial & AI DBSCAN','🧪 Analisis Faktor Risiko','🤖 Analisis ML'])
+    st.markdown('### 🧠 Resume Epidemiologi Terintegrasi — TIME + PERSON + PLACE')
+    show_resume(epidemiology_master_narrative(result,label,sel_disease),'tabel dan grafik analisis di bawah')
+    if isinstance(result.get('priority_score'),pd.DataFrame):
+        st.markdown('#### 🎯 Prioritas Epidemiologis — Burden Score & CFR Score')
+        st.dataframe(result['priority_score'],use_container_width=True,hide_index=True)
+        tabs=st.tabs(['🚨 AI Prediction & Recommendation','📊 Trias Epidemiologi (Detail)','📈 Kurva Epidemik & Prediksi','🗺️ Peta Spasial & AI DBSCAN','🧪 Analisis Faktor Risiko','🤖 Analisis ML'])
     with tabs[0]:
         st.markdown('### 🚨 AI Prediction & Recommendation')
         klb=result.get('klb',{})
@@ -189,7 +266,7 @@ else:
         else: show_resume('SI-HIS mengarahkan tindakan berdasarkan sinyal yang terdeteksi: penyelidikan epidemiologi, penemuan kasus aktif, penelusuran kontak, analisis TIME + PERSON + PLACE, analisis cluster/episentrum, serta pengendalian faktor risiko sesuai penyakit dan temuan lapangan.')
     with tabs[1]:
         st.markdown('### 📊 Trias Epidemiologi (Detail)')
-        tri=result.get('trias_summary',{});show_resume(tri.get('narrative','TIME + PERSON + PLACE menjelaskan kapan, siapa dan di mana kasus terjadi.'))
+        tri=result.get('trias_summary',{});st.caption('Detail TIME + PERSON + PLACE berikut mendukung resume epidemiologi terintegrasi di atas.')
         top10=tri.get('top10_province') if isinstance(tri,dict) else None
         if isinstance(top10,pd.DataFrame) and not top10.empty:render_value(top10,'10 Besar Wilayah')
         render_value(result.get('place'),'PLACE');render_value(result.get('person'),'PERSON')
@@ -202,7 +279,7 @@ else:
         render_value(mortality,'MORTALITY / CFR');render_value(result.get('vulnerable'),'Vulnerable Population')
     with tabs[2]:
         st.markdown('### 📈 Kurva Epidemik & Prediksi')
-        show_resume(curve_narrative(result.get('epidemic_curve_classification'),sel_disease))
+        st.caption('Kurva epidemik dan forecast mendukung interpretasi temporal pada resume epidemiologi terintegrasi di atas.')
         t=result.get('time')
         if isinstance(t,pd.DataFrame) and not t.empty:
             chart=t.copy();chart['Tanggal Sakit']=pd.to_datetime(chart['Tanggal Sakit'],errors='coerce');valid_chart=chart.dropna(subset=['Tanggal Sakit'])
@@ -211,7 +288,7 @@ else:
         if waves:render_value(waves,'Gelombang Temporal')
     with tabs[3]:
         st.markdown('### 🗺️ Peta Spasial & AI DBSCAN')
-        spatial=result.get('spatial');show_resume(spatial_narrative(spatial));render_value(spatial,'Hasil DBSCAN')
+        spatial=result.get('spatial');st.caption('Analisis spasial, cluster dan episentrum digunakan untuk memperkuat interpretasi PLACE pada resume epidemiologi terintegrasi.');render_value(spatial,'Hasil DBSCAN')
         if isinstance(spatial,pd.DataFrame) and not spatial.empty and {'Latitude','Longitude'}.issubset(spatial.columns):
             geo=spatial.dropna(subset=['Latitude','Longitude'])
             if not geo.empty:
@@ -221,7 +298,7 @@ else:
         render_value(result.get('epicenters'),'Episentrum / Titik Prioritas')
         st.caption('Cluster adalah hasil kepadatan spasial. Episentrum adalah lokasi konsentrasi prioritas dalam dataset; keduanya bukan otomatis sumber penularan dan harus dikaitkan dengan TIME, hubungan epidemiologis dan investigasi lapangan.')
     with tabs[4]:
-        st.markdown('### 🧪 Analisis Faktor Risiko');st.markdown('#### Resume Faktor Risiko');show_resume(risk_narrative(result.get('risk_factors')))
+        st.markdown('### 🧪 Analisis Faktor Risiko');st.markdown('#### Detail Analisis Faktor Risiko')
         s=risk_summary(result.get('risk_factors'))
         if not s.empty:st.dataframe(s,use_container_width=True,hide_index=True)
         outcomes=result.get('outcome_analyses',{})
@@ -230,7 +307,7 @@ else:
                 with st.expander(f'Outcome: {outcome_name}',expanded=(outcome_name=='Penyakit')):render_value(outcome)
         render_risk_factors(result.get('risk_factors'))
     with tabs[5]:
-        st.markdown('### 🤖 Analisis ML');show_resume(ml_narrative(result.get('ml')))
+        st.markdown('### 🤖 Analisis ML');st.caption('Analisis ML mendukung decision support dan melengkapi analisis epidemiologi, bukan menggantikannya.')
         if include_ml:render_value(result.get('ml'))
         else:st.info('ML layer belum diaktifkan. Centang **Aktifkan ML layer** pada Panel Kontrol untuk menjalankan prediction models.')
 

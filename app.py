@@ -21,7 +21,17 @@ def _fmt_number(v,digits=4):
 def show_resume(text,detail='tabel'):
     st.info(text or 'Belum tersedia interpretasi untuk scope/data ini.')
     st.caption(f"Untuk lebih detail bisa dilihat pada {detail} di bawah ini.")
-    st.warning('**DISCLAIMER PENTING**\\n\\nHasil analisis berfungsi sebagai **Decision Support System (DSS)**. Keputusan operasional tetap berada di bawah wewenang otoritas kesehatan.')
+    st.markdown('''**DISCLAIMER PENTING**\n\nHasil analisis berfungsi sebagai **Decision Support System (DSS)**. Keputusan operasional tetap berada di bawah wewenang otoritas kesehatan.''')
+
+def render_scoring_explanation():
+    st.markdown('### ❓ Mengapa Perlu Skoring?')
+    st.markdown('''Dalam analisis risiko epidemiologi, kita menghadapi masalah klasik: **jumlah kasus adalah angka absolut** (misal: 50 kasus), sedangkan **CFR adalah persentase** (misal: 5%). Keduanya memiliki satuan dan skala yang berbeda, sehingga tidak bisa langsung dijumlahkan.''')
+    st.markdown('### 📊 Skoring Angka Kasus (Case Burden Score)')
+    st.markdown('''Setiap wilayah diberikan skor 0–100 berdasarkan jumlah kasusnya relatif terhadap wilayah dengan jumlah kasus tertinggi.\n\n> **Rumus:** Skoring Angka Kasus = (Jumlah Kasus Wilayah / Jumlah Kasus Wilayah Tertinggi) × 100\n\n> **Contoh:** Jika Wilayah A punya 50 kasus dan wilayah dengan kasus tertinggi punya 100 kasus, maka Skoring Angka Kasus Wilayah A = (50/100) × 100 = **50**''')
+    st.markdown('### 💀 Skoring Angka Kematian (Fatality Score)')
+    st.markdown('''Setiap wilayah diberikan skor 0–100 berdasarkan CFR-nya relatif terhadap wilayah dengan CFR tertinggi.\n\n> **Rumus:** Skoring Angka Kematian = (CFR Wilayah / CFR Wilayah Tertinggi) × 100\n\n> **Contoh:** Jika Wilayah A punya CFR 5% dan wilayah dengan CFR tertinggi punya CFR 10%, maka Skoring Angka Kematian Wilayah A = (5/10) × 100 = **50**''')
+    st.markdown('### ⚖️ Risk Score Komposit')
+    st.markdown('''Kedua skor digabungkan dengan bobot 50:50 untuk menghasilkan **Risk Score** yang mencerminkan baik *beban jumlah* maupun *tingkat keparahan*:\n\n> **Rumus:** Risk Score = (0.5 × Skoring Angka Kasus) + (0.5 × Skoring Angka Kematian)\n\n**Klasifikasi Risiko:**\n\n- 🔴 **HIGH (≥60)** — Memerlukan intervensi masif segera\n- 🟡 **MEDIUM (35–59)** — Perlu penguatan surveilans dan kesiapsiagaan\n- 🟢 **LOW (<35)** — Pertahankan pemantauan rutin''')
 
 def render_value(value,title=None):
     if title:st.markdown(f'#### {title}')
@@ -250,6 +260,7 @@ else:
     if isinstance(result.get('priority_score'),pd.DataFrame):
         st.markdown('#### 🎯 Prioritas Epidemiologis — Burden Score & CFR Score')
         st.dataframe(result['priority_score'],use_container_width=True,hide_index=True)
+        render_scoring_explanation()
     with tabs[0]:
         st.markdown('### 🚨 AI Prediction & Recommendation')
         klb=result.get('klb',{})

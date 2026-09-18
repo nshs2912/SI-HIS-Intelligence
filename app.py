@@ -232,74 +232,406 @@ def ews_narrative(ews,rt):
     if isinstance(rt,dict):text+=f" Rₜ relatif terbaru **{float(rt.get('rt_recent',1)):.2f}**."
     return text+' Penetapan KLB memerlukan baseline historis, definisi kasus, kelengkapan pelaporan dan verifikasi lapangan.'
 
+def _fmt_pct(value):
+    try:
+        return f"{float(value):.2f}%"
+    except Exception:
+        return "Tidak dapat dihitung"
+
+def _fmt_int(value):
+    try:
+        return f"{int(value):,}"
+    except Exception:
+        return "Tidak dapat dihitung"
+
+def _death_series_app(df):
+    death=pd.to_numeric(df.get('Is_Meninggal',pd.Series(0,index=df.index)),errors='coerce').fillna(0).astype(int)
+    if 'Status Penderita' in df.columns:
+        status=df['Status Penderita'].astype(str).str.strip().str.lower().eq('meninggal').astype(int)
+        death=pd.Series(np.maximum(death,status),index=df.index)
+    return death
+
+def _outcome_resume(outcomes):
+    if not isinstance(outcomes,dict):
+        return "Modul outcome-specific belum tersedia."
+    sections=[]
+    for name,obj in outcomes.items():
+        if not isinstance(obj,dict):
+            continue
+        if obj.get('available'):
+            n=obj.get('n',0);events=obj.get('events',0);rate=obj.get('event_rate_pct')
+            sections.append(
+                f"**{name} — MODEL TERSEDIA.** Pertanyaan analisis: {obj.get('question','-')} "
+                f"Jumlah observasi lengkap **{_fmt_int(n)}**, event/outcome **{_fmt_int(events)}**"
+                + (f" ({_fmt_pct(rate)})." if rate is not None else ".")
+                + " Faktor independen dianalisis terhadap outcome ini secara terpisah; hasil asosiasi tidak boleh dipindahkan menjadi kesimpulan untuk outcome lain."
+            )
+        else:
+            sections.append(
+                f"**{name} — BELUM DAPAT DIMODELKAN.** {obj.get('status','Data belum memenuhi syarat.')}"
+            )
+    return "\n\n".join(sections) if sections else "Belum ada outcome yang dapat diringkas."
+
 def ai_prediction_narrative(result,disease,label):
+    """
+    Detailed AI Prediction & Recommendation / Situational Intelligence Report.
+    The narrative follows the reference flow: situation -> hard alert -> KLB
+    surveillance parameters -> TIME -> PERSON -> PLACE -> EWS/prediction ->
+    CFR comparison -> geographic priority scoring -> vulnerable population ->
+    outcome-specific risk analysis -> spatial signal -> forecast -> response.
+    All numbers are calculated from the current analysis dataframe.
+    """
     df=result.get('analysis_dataframe')
-    total=int(result.get('overview',{}).get('total_cases',len(df) if isinstance(df,pd.DataFrame) else 0) or 0)
-    deaths=int(result.get('overview',{}).get('deaths',0) or 0)
-    cfr=(deaths/total*100) if total else 0
+    if not isinstance(df,pd.DataFrame) or df.empty:
+        return "**Situational Intelligence Report belum dapat dibentuk** karena data kasus pada scope ini kosong."
+
+    work=df.copy()
+    if 'Tanggal Sakit' in work.columns:
+        work['Tanggal Sakit']=pd.to_datetime(work['Tanggal Sakit'],errors='coerce')
+
+    total=len(work)
+    death=_death_series_app(work)
+    deaths=int(death.sum())
+    cfr=(deaths/total*100) if total else 0.0
+
+    sections=[]
+    sections.append(
+        f"## 🧠 AI Epidemiologist — Situational Intelligence Report\n\n"
+        f"**Penyakit:** {disease}  \n"
+        f"**Scope:** {label}  \n"
+        f"**Basis analisis:** Trias Epidemiologi (**TIME + PERSON + PLACE**) + outcome "
+        f"(**Penyakit + Severity + Kasus Meninggal**) + early warning + spatial intelligence + forecasting."
+    )
+
+    # 1. Situational status / hard trigger
+    sections.append(
+        f"### 1. STATUS SITUASI\n"
+        f"Pada scope **{label}**, SI-HIS menganalisis **{_fmt_int(total)} kasus {disease}**. "
+        f"Ditemukan **{_fmt_int(deaths)} kasus meninggal**, sehingga tingkat kematian di antara kasus "
+        f"(**CFR**) adalah **{_fmt_pct(cfr)}**. CFR merupakan proporsi kematian di antara kasus penyakit "
+        f"dan **bukan mortality rate populasi**."
+    )
+    if deaths>0:
+        sections.append(
+            "### 🔴 ALERT MERAH — KEMATIAN TERDETEKSI\n"
+            f"SI-HIS mendeteksi **{_fmt_int(deaths)} kematian** pada kasus penyakit ini. "
+            "Setiap kematian memicu **ALERT merah** untuk respons SKD dan **penyelidikan epidemiologi lebih lanjut**. "
+            "Alert ini sengaja tidak menunggu akumulasi kasus atau kepastian KLB. **SI-HIS tidak menyatakan bahwa kondisi "
+            "tersebut otomatis merupakan KLB**; penetapan status KLB tetap merupakan kewenangan otoritas sesuai ketentuan."
+        )
+    else:
+        sections.append(
+            "### 🟢 STATUS KEMATIAN\n"
+            "Tidak ditemukan kasus meninggal pada scope ini. SI-HIS tetap menilai perubahan TIME, distribusi PERSON, "
+            "konsentrasi PLACE, severity dan faktor risiko karena tidak adanya kematian saat ini tidak meniadakan sinyal epidemiologis lain."
+        )
+
+    # 2. KLB surveillance parameters
+    klb=result.get('klb',{})
+    if isinstance(klb,dict):
+        criteria=klb.get('criteria',[])
+        triggered=[c for c in criteria if isinstance(c,dict) and c.get('triggered')]
+        insufficient=[c for c in criteria if isinstance(c,dict) and not c.get('data_sufficient',True)]
+        trigger_lines=[]
+        for c in triggered:
+            trigger_lines.append(f"- **{c.get('code','-')} — {c.get('name','-')}**: nilai **{c.get('value','-')}**, threshold **{c.get('threshold','-')}**. {c.get('evidence','')}")
+        sections.append(
+            "### 2. PARAMETER KEWASPADAAN / KLB\n"
+            f"Ruleset SI-HIS menghasilkan status **{klb.get('status','-')}** dengan "
+            f"**{len(triggered)} indikator terpicu** dari {len(criteria)} indikator yang dievaluasi. "
+            f"Landasan regulasi yang ditampilkan engine: **{klb.get('regulatory_basis',{}).get('name','Permenkes No. 1 Tahun 2026')}**. "
+            "Status ini adalah sinyal surveillance/decision support dan bukan deklarasi legal KLB."
+        )
+        if trigger_lines:
+            sections.append("**Indikator yang terpicu:**\n" + "\n".join(trigger_lines))
+        if insufficient:
+            names=", ".join([f"{c.get('code','-')} ({c.get('name','-')})" for c in insufficient])
+            sections.append(
+                f"**Keterbatasan baseline/data:** {len(insufficient)} indikator belum dapat dinilai secara penuh: **{names}**. "
+                "SI-HIS tidak mengisi baseline yang tidak tersedia dengan asumsi buatan."
+            )
+
+    # 3. TIME
+    if 'Tanggal Sakit' in work.columns and work['Tanggal Sakit'].notna().any():
+        dates=work['Tanggal Sakit'].dropna()
+        end=dates.max().normalize()
+        cur_start=end-pd.Timedelta(days=6)
+        prev_start=end-pd.Timedelta(days=13)
+        prev_end=end-pd.Timedelta(days=7)
+        cur=work[work['Tanggal Sakit'].between(cur_start,end)]
+        prev=work[work['Tanggal Sakit'].between(prev_start,prev_end)]
+        cur_d=int(death.loc[cur.index].sum())
+        prev_d=int(death.loc[prev.index].sum())
+        cur_cfr=cur_d/len(cur)*100 if len(cur) else 0
+        prev_cfr=prev_d/len(prev)*100 if len(prev) else 0
+        delta=((len(cur)-len(prev))/len(prev)*100) if len(prev) else None
+        direction="MENINGKAT" if len(cur)>len(prev) else ("MENURUN" if len(cur)<len(prev) else "RELATIF TETAP")
+        time_lines=(
+            f"### 3. TIME — PERUBAHAN TEMPORAL\n"
+            f"Periode 7 hari terakhir (**{cur_start.date()}–{end.date()}**) memiliki **{_fmt_int(len(cur))} kasus** "
+            f"dan **{_fmt_int(cur_d)} kematian** (CFR {_fmt_pct(cur_cfr)}). "
+            f"Periode 7 hari sebelumnya (**{prev_start.date()}–{prev_end.date()}**) memiliki **{_fmt_int(len(prev))} kasus** "
+            f"dan **{_fmt_int(prev_d)} kematian** (CFR {_fmt_pct(prev_cfr)}). "
+            f"Perubahan kasus: **{direction}**"
+        )
+        if delta is not None:
+            time_lines += f" sebesar **{delta:+.2f}%**."
+        else:
+            time_lines += "; periode pembanding belum memiliki observasi yang cukup."
+        sections.append(time_lines)
+        daily=work.groupby(work['Tanggal Sakit'].dt.normalize()).size().sort_index()
+        if len(daily)>=3:
+            peak_date=daily.idxmax()
+            peak_n=int(daily.max())
+            last7=daily.tail(7)
+            sections.append(
+                f"**Fluktuasi jangka pendek:** puncak kasus harian pada dataset terjadi **{peak_date.date()}** sebanyak "
+                f"**{_fmt_int(peak_n)} kasus**. Tujuh titik harian terakhir: **{', '.join(map(str,last7.astype(int).tolist()))}**. "
+                "Sinyal beberapa jam/hari/minggu dapat digunakan sebagai pemicu investigasi; tidak harus menunggu tren bulanan."
+            )
+        span=(dates.max()-dates.min()).days
+        if span>=180:
+            monthly=work.groupby(work['Tanggal Sakit'].dt.to_period('M')).size()
+            sections.append(
+                f"**Tren lebih panjang:** rentang observasi sekitar **{_fmt_int(span)} hari** dengan "
+                f"**{len(monthly)} bulan** teramati. Distribusi bulanan dapat digunakan untuk eksplorasi tren/musiman; "
+                "pola multi-tahun belum boleh disimpulkan tanpa seri waktu yang memadai."
+            )
+        else:
+            sections.append(
+                f"**Tren lebih panjang:** rentang observasi hanya sekitar **{_fmt_int(span)} hari**, sehingga "
+                "belum memadai untuk menyimpulkan pola musiman atau secular/cyclic trend."
+            )
+    else:
+        sections.append("### 3. TIME — PERUBAHAN TEMPORAL\nTanggal sakit tidak tersedia/valid sehingga analisis temporal tidak dapat dihitung.")
+
+    # 4. PERSON
+    person_parts=[]
+    if 'Jenis Kelamin' in work.columns:
+        vc=work['Jenis Kelamin'].astype(str).replace('nan','Tidak diketahui').value_counts()
+        if not vc.empty:
+            person_parts.append("jenis kelamin: " + ", ".join([f"**{k} {_fmt_int(v)} ({v/total*100:.2f}%)**" for k,v in vc.items()]))
+    if 'Umur' in work.columns:
+        age=pd.to_numeric(work['Umur'],errors='coerce')
+        bins=pd.cut(age,bins=[-np.inf,1,5,10,15,20,25,35,45,55,65,75,85,np.inf],
+                    labels=['<1 tahun','1-4 tahun','5-9 tahun','10-14 tahun','15-19 tahun','20-24 tahun',
+                            '25-34 tahun','35-44 tahun','45-54 tahun','55-64 tahun','65-74 tahun','75-84 tahun','≥85 tahun'],
+                    right=False)
+        vc=bins.value_counts(sort=False).dropna()
+        if not vc.empty:
+            k=vc.idxmax();n=int(vc.max())
+            person_parts.append(f"kelompok umur dominan **{k} {_fmt_int(n)} ({n/total*100:.2f}%)**")
+    for col,label2 in [('Pekerjaan','pekerjaan'),('Status Imunisasi','status imunisasi'),('Merokok','merokok'),('Aktivitas Fisik','aktivitas fisik'),('Komorbid','komorbid')]:
+        if col in work.columns:
+            vc=work[col].astype(str).replace('nan','Tidak diketahui').value_counts()
+            if not vc.empty and vc.index[0]!='Tidak diketahui':
+                person_parts.append(f"{label2}: **{vc.index[0]} {_fmt_int(vc.iloc[0])} ({vc.iloc[0]/total*100:.2f}%)**")
+    sections.append(
+        "### 4. PERSON — SIAPA YANG TERDAMPAK\n"
+        + ("Distribusi kasus menunjukkan " + "; ".join(person_parts) + ". " if person_parts else "Variabel person yang diperlukan belum tersedia. ")
+        + "Kelompok dominan menggambarkan komposisi kasus, bukan otomatis kelompok dengan risiko tertinggi; "
+        "untuk menyimpulkan risiko diperlukan denominator populasi dan analisis outcome yang sesuai."
+    )
+
+    # 5. PLACE
+    place=[]
+    for col,label2 in [('Provinsi','provinsi'),('Kabupaten','kabupaten/kota'),('Kecamatan','kecamatan'),('Desa/Kelurahan','desa/kelurahan')]:
+        if col in work.columns:
+            g=work.groupby(col,dropna=False).agg(Kasus=(col,'size'),Meninggal=('_death_tmp','sum') if '_death_tmp' in work else (col,'size')).reset_index()
+            g=g.sort_values('Kasus',ascending=False)
+            if not g.empty:
+                r=g.iloc[0]
+                place.append(f"**{label2} {r[col]}: {_fmt_int(r['Kasus'])} kasus**")
+    if place:
+        sections.append(
+            "### 5. PLACE — DI MANA KASUS TERKONSENTRASI\n"
+            + "; ".join(place) + ". "
+            "Konsentrasi kasus menunjukkan beban absolut pada wilayah; interpretasi transmisi membutuhkan denominator populasi, "
+            "waktu, paparan dan verifikasi lapangan."
+        )
+    else:
+        sections.append("### 5. PLACE — DI MANA KASUS TERKONSENTRASI\nVariabel geografis belum tersedia.")
+
+    # 6. EWS / prediction
     ews=result.get('ews',{}) if isinstance(result.get('ews',{}),dict) else {}
+    rt=result.get('rt',{}) if isinstance(result.get('rt',{}),dict) else {}
     score=ews.get('ews_score',ews.get('score',ews.get('EWS')))
     trend=ews.get('trend_pct',ews.get('trend'))
-    rt=result.get('rt',{}) if isinstance(result.get('rt',{}),dict) else {}
     rt_value=rt.get('rt_recent')
-    parts=[f"**Status situasi:** SI-HIS menganalisis **{total:,} kasus {disease}** pada scope **{label}**, dengan **{deaths:,} kasus meninggal** dan **CFR {cfr:.2f}%**."]
-    if deaths>0:
-        parts.append("🔴 **ALERT MERAH — KEMATIAN TERDETEKSI.** Setiap kematian pada kasus penyakit memicu sinyal kewaspadaan tinggi dan memerlukan respons SKD serta penyelidikan epidemiologi lebih lanjut. Ini bukan penetapan status KLB otomatis.")
-    elif total>0:
-        parts.append("🟢 Belum terdapat kematian pada scope ini; SI-HIS tetap mengevaluasi perubahan temporal, spasial, severity, dan faktor risiko.")
-    if isinstance(score,(int,float)) or isinstance(trend,(int,float)) or rt_value is not None:
-        metrics=[]
-        if isinstance(score,(int,float)):metrics.append(f"EWS **{float(score):.1f}/100**")
-        if isinstance(trend,(int,float)):metrics.append(f"tren 7 hari **{float(trend):+.1f}%**")
-        if rt_value is not None:metrics.append(f"Rₜ **{float(rt_value):.2f}**")
-        parts.append("**Prediksi & early warning:** "+", ".join(metrics)+". Nilai tersebut dibaca bersama TIME + PERSON + PLACE dan tidak diperlakukan sebagai probabilitas KLB tanpa model probabilistik yang tervalidasi.")
+    metrics=[]
+    if score is not None:metrics.append(f"EWS **{float(score):.1f}/100**")
+    if trend is not None:metrics.append(f"perubahan tren **{float(trend):+.2f}%**")
+    if rt_value is not None:metrics.append(f"Rₜ **{float(rt_value):.2f}**")
+    sections.append(
+        "### 6. EWS + PREDICTION\n"
+        + (("Indikator saat ini: " + ", ".join(metrics) + ". ") if metrics else "Indikator EWS/Rₜ belum dapat dihitung. ")
+        + "EWS adalah indikator kewaspadaan internal. Jika baseline pembanding tidak tersedia, SI-HIS tetap menampilkan sinyal observasional "
+        "dan tidak membuat angka probabilitas KLB yang tidak berasal dari model tervalidasi. Sinyal harus dibaca bersama TIME + PERSON + PLACE."
+    )
+
+    # 7. CFR comparison within scope
+    if 'Provinsi' in work.columns and total:
+        pg=work.groupby('Provinsi').agg(Kasus=('Provinsi','size'),Meninggal=('_death_tmp','sum') if '_death_tmp' in work else ('Provinsi','size')).reset_index()
+        pg['CFR']=np.where(pg['Kasus']>0,pg['Meninggal']/pg['Kasus']*100,0)
+        mean=float(pg['CFR'].mean()) if not pg.empty else 0
+        sd=float(pg['CFR'].std(ddof=1)) if len(pg)>1 else 0
+        threshold=mean+1.5*sd
+        high=pg[pg['CFR']>threshold].sort_values('CFR',ascending=False)
+        top=pg.sort_values('CFR',ascending=False).iloc[0] if not pg.empty else None
+        comp=(
+            f"### 7. PERBANDINGAN CFR ANTARWILAYAH\n"
+            f"Rata-rata CFR antar-provinsi pada scope ini **{_fmt_pct(mean)}** dengan SD **{_fmt_pct(sd)}**. "
+            f"Sebagai **aturan statistik operasional internal**, ambang pembanding dihitung **mean + 1,5×SD = {_fmt_pct(threshold)}**; "
+            "ini bukan kriteria legal KLB dan bukan 'ambang kewaspadaan nasional'."
+        )
+        if top is not None:
+            comp += f" Wilayah dengan CFR tertinggi adalah **{top['Provinsi']} {top['CFR']:.2f}%** ({_fmt_int(top['Meninggal'])} meninggal/{_fmt_int(top['Kasus'])} kasus)."
+        if not high.empty:
+            comp += " Wilayah yang melampaui aturan pembanding tersebut: " + ", ".join([f"**{r['Provinsi']} ({r['CFR']:.2f}%)**" for _,r in high.iterrows()]) + "."
+        else:
+            comp += " Tidak ada wilayah yang melampaui aturan pembanding ini."
+        sections.append(comp)
+
+    # 8. Burden + fatality scoring
     pri=result.get('priority_score')
-    if (not isinstance(pri,pd.DataFrame) or pri.empty) and isinstance(df,pd.DataFrame) and not df.empty:
-        ds=pd.to_numeric(df.get('Is_Meninggal',pd.Series(0,index=df.index)),errors='coerce').fillna(0)
-        if 'Status Penderita' in df.columns:
-            ds=pd.Series(np.maximum(ds,df['Status Penderita'].astype(str).str.lower().eq('meninggal').astype(int)),index=df.index)
-        pri=build_priority_score(df,ds)
+    if not isinstance(pri,pd.DataFrame) or pri.empty:
+        pri=build_priority_score(work,death)
         if not pri.empty: result['priority_score']=pri
     if isinstance(pri,pd.DataFrame) and not pri.empty:
-        p=pri.copy()
-        risk_col='Risk Score' if 'Risk Score' in p.columns else None
-        if risk_col:
-            high=p[p[risk_col]>=60]
-            parts.append(f"**Risk stratification:** {len(high)} dari {len(p)} wilayah pada tabel prioritas memiliki Risk Score ≥60. Skor komposit merupakan alat prioritas relatif dalam scope, bukan risiko individual atau ambang hukum KLB.")
-        top_b=p.sort_values('Burden Score',ascending=False).iloc[0]
-        top_f=p.sort_values('CFR Score',ascending=False).iloc[0]
-        level=p.columns[0]
-        parts.append(f"**Beban kasus:** prioritas burden tertinggi pada **{top_b.get(level,'-')}** (Burden Score {float(top_b.get('Burden Score',0)):.2f}). **Fatalitas relatif:** tertinggi pada **{top_f.get(level,'-')}** (CFR Score {float(top_f.get('CFR Score',0)):.2f}; CFR {float(top_f.get('CFR',0)):.2f}%).")
+        level=pri.columns[0]
+        top_r=pri.iloc[0]
+        top_b=pri.sort_values('Burden Score',ascending=False).iloc[0]
+        top_f=pri.sort_values('CFR Score',ascending=False).iloc[0]
+        high=pri[pri['Risk Score']>=60]
+        sections.append(
+            "### 8. RISK STRATIFICATION — CASE BURDEN + FATALITY/CFR SCORE\n"
+            f"Pada level geografis terdetail yang tersedia (**{level}**), **{_fmt_int(len(high))} dari {_fmt_int(len(pri))} wilayah** "
+            "memiliki Risk Score ≥60. "
+            f"Prioritas komposit tertinggi: **{top_r[level]}**, Risk Score **{top_r['Risk Score']:.2f}** ({top_r['Risk Level']}). "
+            f"Burden Score tertinggi: **{top_b[level]} = {top_b['Burden Score']:.2f}**. "
+            f"CFR/Fatality Score tertinggi: **{top_f[level]} = {top_f['CFR Score']:.2f}**, CFR **{top_f['CFR']:.2f}%**."
+        )
+        # Explicit interpretation of the composite threshold requested in the reference.
+        if float(top_r['Risk Score'])>=60:
+            sections.append(
+                f"🔴 **INTERPRETASI SKOR:** Risk Score **{top_r['Risk Score']:.2f} ≥ 60**, sehingga wilayah **{top_r[level]}** "
+                "masuk prioritas **HIGH** dalam ruleset operasional SI-HIS. Ini adalah hasil kombinasi **50% Case Burden Score + "
+                "50% CFR/Fatality Score**. Angka ≥60 adalah **ambang skoring prioritas internal**, bukan ambang epidemiologis nasional "
+                "dan bukan kriteria legal KLB."
+            )
+        else:
+            sections.append(
+                f"**INTERPRETASI SKOR:** Risk Score tertinggi **{top_r['Risk Score']:.2f}** belum mencapai ambang prioritas HIGH (≥60) "
+                "dalam ruleset internal, namun setiap kematian tetap memicu ALERT merah."
+            )
+    else:
+        sections.append("### 8. RISK STRATIFICATION\nSkoring geografis belum dapat dihitung karena variabel wilayah tidak memadai.")
+
+    # 9. Vulnerable population
     vuln=result.get('vulnerable')
     if isinstance(vuln,list) and vuln:
         v=pd.DataFrame(vuln)
         if not v.empty:
-            top=v.iloc[0]
-            parts.append(f"**Vulnerable population:** strata dengan CFR tertinggi pada hasil analisis adalah **{top.get('Age_Group','-')} × {top.get('Pekerjaan','-')} × {top.get('Status Komorbid','-')}**, n={int(top.get('Total',0))}, CFR={float(top.get('CFR (%)',0)):.2f}%. Hasil dengan n kecil harus dibaca sebagai sinyal untuk investigasi, bukan kesimpulan kausal.")
+            v['CFR (%)']=pd.to_numeric(v.get('CFR (%)',0),errors='coerce')
+            top=v.sort_values('CFR (%)',ascending=False).iloc[0]
+            sections.append(
+                "### 9. VULNERABLE POPULATION\n"
+                f"Stratum dengan CFR tertinggi pada hasil stratifikasi adalah **{top.get('Age_Group','-')} × "
+                f"{top.get('Pekerjaan','-')} × {top.get('Status Komorbid','-')}**, dengan **n={_fmt_int(top.get('Total',0))}** "
+                f"dan CFR **{float(top.get('CFR (%)',0)):.2f}%**."
+                " Temuan ini adalah sinyal stratifikasi pada dataset; bila n kecil, ketidakpastian tinggi dan hasil tidak boleh diperlakukan "
+                "sebagai bukti kausal. Risk multiplier, bila tersedia, harus dibaca sebagai perbandingan terhadap baseline yang didefinisikan engine."
+            )
+    else:
+        sections.append("### 9. VULNERABLE POPULATION\nProfil rentan belum dapat diidentifikasi dari variabel yang tersedia.")
+
+    # 10. Outcome-specific analysis
     outcomes=result.get('outcome_analyses',{})
-    if isinstance(outcomes,dict):
-        available=[name for name,obj in outcomes.items() if isinstance(obj,dict) and obj.get('available')]
-        unavailable=[name for name,obj in outcomes.items() if isinstance(obj,dict) and not obj.get('available')]
-        if available:parts.append("**Outcome analysis:** model dijalankan terpisah untuk **"+", ".join(available)+"**; masing-masing outcome memiliki pertanyaan epidemiologis dan model sendiri.")
-        if unavailable:parts.append("Outcome yang belum dapat dimodelkan: **"+", ".join(unavailable)+"**, karena field/kelengkapan/kecukupan data belum memenuhi syarat.")
+    sections.append(
+        "### 10. OUTCOME-SPECIFIC EPIDEMIOLOGY\n"
+        "SI-HIS tidak menggunakan satu outcome untuk menjawab semua pertanyaan. Setiap outcome memiliki dependent variable dan interpretasi sendiri.\n\n"
+        + _outcome_resume(outcomes)
+    )
+
+    # 11. Spatial intelligence
     spatial=result.get('spatial')
     if isinstance(spatial,pd.DataFrame) and not spatial.empty and 'Cluster' in spatial.columns:
-        clusters=spatial['Cluster'].value_counts().drop(index=-1,errors='ignore')
-        noise=int((spatial['Cluster']==-1).sum())
-        parts.append(f"**Spatial signal:** DBSCAN menemukan **{len(clusters)} cluster** dan **{noise} titik noise/outlier**. Cluster/episentrum adalah konsentrasi dalam dataset, bukan otomatis sumber penularan.")
-    forecast=result.get('forecast')
-    if isinstance(forecast,dict) and forecast.get('forecast'):
-        vals=pd.to_numeric(pd.Series(forecast.get('forecast',[])),errors='coerce').dropna()
-        if not vals.empty:
-            parts.append(f"**Forecast 14 hari:** model {forecast.get('model','Holt-Winters')} menghasilkan estimasi sekitar **{vals.iloc[0]:.1f}** kasus pada titik awal forecast hingga **{vals.iloc[-1]:.1f}** pada titik akhir. Ini estimasi model dengan ketidakpastian, bukan jumlah kasus yang pasti terjadi.")
-    rec=result.get('recommendations',result.get('recommendation'))
-    if rec:
-        parts.append("**Prioritas respons:** gunakan sinyal kematian, perubahan TIME, konsentrasi PLACE, kelompok PERSON rentan, severity dan faktor risiko untuk menentukan penyelidikan epidemiologi, active case finding, penelusuran kontak, review tata laksana dan pengendalian faktor risiko sesuai pedoman penyakit.")
+        counts=spatial['Cluster'].value_counts()
+        clusters=counts.drop(index=-1,errors='ignore')
+        noise=int(counts.get(-1,0))
+        sections.append(
+            "### 11. SPATIAL INTELLIGENCE\n"
+            f"DBSCAN mengidentifikasi **{_fmt_int(len(clusters))} cluster kepadatan** dan **{_fmt_int(noise)} titik noise/outlier** "
+            "pada koordinat yang tersedia. Jika terdapat kematian, lokasi kematian perlu ditelusuri kembali pada level desa/kecamatan "
+            "untuk melihat konsentrasi kasus dan apakah terdapat cluster yang berdekatan. DBSCAN menunjukkan kepadatan data, bukan otomatis "
+            "hotspot statistik atau sumber penularan."
+        )
+        epi=result.get('epicenters')
+        if isinstance(epi,pd.DataFrame) and not epi.empty:
+            sections.append(
+                f"**Episentrum/titik prioritas:** engine menghasilkan **{_fmt_int(len(epi))} lokasi** untuk ditinjau. "
+                "Lokasi tersebut adalah konsentrasi prioritas dalam dataset dan harus dikaitkan dengan TIME, hubungan epidemiologis, "
+                "paparan, kepadatan penduduk, serta investigasi lapangan."
+            )
     else:
-        parts.append("**Prioritas respons:** lakukan penyelidikan epidemiologi segera pada sinyal kematian, kemudian perluas analisis ke distribusi desa/kecamatan, cluster/episentrum, perubahan temporal, severity, faktor risiko dan kelompok rentan untuk menentukan tindakan lapangan yang proporsional.")
-    parts.append("**Catatan skoring:** Case Burden Score dan Fatality/CFR Score dinormalisasi 0–100 karena jumlah kasus dan CFR memiliki skala berbeda. Risk Score menggunakan kombinasi 50:50; **Risk Score ≥60** diperlakukan sebagai prioritas tinggi dalam ruleset operasional ini. Ambang ini adalah parameter prioritas internal, bukan 'ambang kewaspadaan nasional' dan bukan kriteria legal KLB.")
-    parts.append("**DISCLAIMER PENTING:** Hasil analisis berfungsi sebagai **Decision Support System (DSS)**. Keputusan operasional tetap berada di bawah wewenang otoritas kesehatan.")
-    return " ".join(parts)
+        sections.append("### 11. SPATIAL INTELLIGENCE\nKoordinat spasial belum memadai untuk analisis cluster.")
+
+    # 12. Forecast
+    fc=result.get('forecast')
+    if isinstance(fc,dict) and fc.get('forecast'):
+        vals=pd.to_numeric(pd.Series(fc.get('forecast',[])),errors='coerce').dropna()
+        sections.append(
+            "### 12. FORECAST 14 HARI\n"
+            + (f"Model **{fc.get('model','Holt-Winters')}** memproyeksikan titik awal sekitar **{vals.iloc[0]:.1f} kasus** "
+               f"dan titik akhir sekitar **{vals.iloc[-1]:.1f} kasus** dengan arah tren **{fc.get('trend','-')}**. "
+               "Forecast adalah estimasi model dengan ketidakpastian; bukan jumlah kasus yang pasti terjadi.")
+            if not vals.empty else "Forecast tersedia tetapi tidak menghasilkan nilai numerik yang valid."
+        )
+    else:
+        sections.append("### 12. FORECAST 14 HARI\nForecast belum tersedia karena data temporal belum memadai.")
+
+    # 13. Recommendation chain — detailed but disease-neutral
+    response=[]
+    if deaths>0:
+        response.extend([
+            "**Prioritas 0 — Respons kematian:** lakukan review segera terhadap seluruh kasus meninggal, definisi kasus, tanggal onset/diagnosis, "
+            "severity, keterlambatan mencari pertolongan, tempat perawatan, dan kemungkinan keterkaitan epidemiologis.",
+            "**Prioritas 1 — Investigasi wilayah:** drill-down dari provinsi → kabupaten/kota → kecamatan → desa/kelurahan; petakan seluruh kasus "
+            "dan kematian, lalu periksa konsentrasi/cluster pada lokasi yang sama.",
+            "**Prioritas 2 — Penemuan kasus:** lakukan active case finding/contact investigation sesuai pedoman penyakit dan hasil investigasi lapangan.",
+            "**Prioritas 3 — Faktor risiko & outcome:** analisis terpisah faktor yang berasosiasi dengan penyakit, severity, dan kematian; gunakan OR/CI/model "
+            "multivariat bila tersedia dan jangan menyamakan asosiasi dengan kausalitas.",
+            "**Prioritas 4 — Pencegahan:** arahkan intervensi pada paparan/faktor yang didukung bukti lapangan dan pedoman penyakit; lakukan monitoring ulang "
+            "TIME + PERSON + PLACE setelah intervensi."
+        ])
+    else:
+        response.extend([
+            "**Prioritas 0 — Surveillance aktif:** pantau perubahan kasus pada skala harian dan mingguan serta perubahan severity/mortalitas.",
+            "**Prioritas 1 — Drill-down wilayah:** telusuri konsentrasi kasus sampai level desa/kelurahan bila data tersedia.",
+            "**Prioritas 2 — Outcome-specific analysis:** identifikasi faktor yang berasosiasi dengan penyakit, severity dan kematian secara terpisah.",
+            "**Prioritas 3 — Pencegahan:** gunakan kombinasi TIME + PERSON + PLACE, hasil spatial dan faktor risiko untuk menentukan tindakan sesuai pedoman."
+        ])
+    sections.append(
+        "### 13. RECOMMENDATION & RESPONSE PRIORITY\n" + "\n".join([f"{i+1}. {x}" for i,x in enumerate(response)])
+    )
+
+    sections.append(
+        "### 14. KESIMPULAN AI PREDICTION\n"
+        "SI-HIS mengubah data kasus menjadi **situational intelligence**: mendeteksi sinyal, menunjukkan siapa yang terdampak, "
+        "di mana konsentrasinya, kapan perubahan terjadi, outcome apa yang bermasalah, wilayah mana yang menjadi prioritas relatif, "
+        "dan bagaimana pola dapat berkembang menurut model. **Kematian tidak menunggu kepastian KLB untuk memicu ALERT merah.** "
+        "Namun ALERT bukan deklarasi KLB; investigasi epidemiologi dan kewenangan otoritas tetap menjadi tahap penentu."
+    )
+    sections.append(
+        "**Catatan skoring:** Case Burden Score dan CFR/Fatality Score dinormalisasi 0–100 karena jumlah kasus dan CFR memiliki skala berbeda. "
+        "Risk Score = **50% Case Burden Score + 50% CFR/Fatality Score**. **Risk Score ≥60 = HIGH** dalam ruleset operasional SI-HIS. "
+        "Ambang ini adalah parameter prioritas internal, bukan 'ambang kewaspadaan nasional' dan bukan kriteria legal KLB."
+    )
+    sections.append(
+        "**DISCLAIMER PENTING:** Hasil analisis berfungsi sebagai **Decision Support System (DSS)**. Keputusan operasional tetap berada di bawah "
+        "wewenang otoritas kesehatan."
+    )
+    return "\n\n".join(sections)
 
 def spatial_narrative(spatial):
     if not isinstance(spatial,pd.DataFrame) or spatial.empty:return 'Belum terdapat cukup koordinat untuk analisis kepadatan spasial.'

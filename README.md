@@ -69,8 +69,15 @@ The bundled dataset is **synthetic only**. It is intended to exercise the full n
 3. Spatial Outbreak Prediction
 4. Vulnerable Population Prediction
 5. Robust Forecasting
+6. Epidemiological ML signal detection
+   - Isolation Forest temporal anomaly screening
+   - rolling-baseline change-point screening
+   - area growth-risk model for elevated next-7-day burden
+   - spatial neighbour features
+   - unsupervised vulnerability clustering
+   - transparent continuous-signal prioritization score
 
-ML output is decision support. It requires historical labelled data, temporal validation, calibration, external validation, drift monitoring, auditability and human oversight before operational use.
+ML output is decision support. It requires historical labelled data, temporal validation, calibration, external validation, drift monitoring, auditability and human oversight before operational use. Epidemiological ML signals are never legal KLB determinations; derived targets must be versioned and validated against applicable disease-specific rules.
 
 ## Development
 

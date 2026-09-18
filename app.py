@@ -688,12 +688,91 @@ def vulnerable_narrative(v):
     if not isinstance(v,list) or not v:return 'Belum ditemukan profil populasi rentan yang memenuhi batas minimal analisis.'
     d=pd.DataFrame(v);top=d.iloc[0];return f"Metode menggunakan stratifikasi **Kelompok Umur × Pekerjaan × Status Komorbid**, lalu menghitung kasus, kematian, tingkat kematian akibat penyakit (CFR) dan Risk Multiplier terhadap baseline. Profil teratas: **{top.get('Age_Group','-')} × {top.get('Pekerjaan','-')} × {top.get('Status Komorbid','-')}**, n={int(top.get('Total',0))}, CFR={float(top.get('CFR (%)',0)):.2f}%. Strata kecil harus ditafsirkan hati-hati."
 
+ML_MENU_GUIDANCE = {
+    'Case Severity': (
+        '**Mengapa penting:** jumlah kasus saja tidak cukup; sistem perlu memperkirakan kemungkinan outcome berat agar pemantauan klinis dan kesiapsiagaan layanan dapat diprioritaskan. '
+        '**Istilah:** *severity* berarti tingkat keparahan outcome yang didefinisikan dataset. Model saat ini menggunakan target turunan kematian atau rawat inap, sehingga bukan diagnosis keparahan klinis baru. '
+        '**Untuk kebijakan:** gunakan hasil sebagai prioritas pemantauan, bukan keputusan klinis individual.'
+    ),
+    'KLB / Outbreak': (
+        '**Mengapa penting:** lonjakan beban kasus dapat terlihat sebelum dampaknya penuh pada layanan. Model memperkirakan beban 7 hari berdasarkan pola historis. '
+        '**Istilah:** *threshold* adalah ambang pembanding yang diturunkan dari distribusi historis model; ini berbeda dari kriteria legal KLB. '
+        '**Untuk kebijakan:** sinyal tinggi menjadi alasan mempercepat verifikasi epidemiologis.'
+    ),
+    'Spatial Outbreak': (
+        '**Mengapa penting:** epidemi selalu memiliki dimensi tempat. Pola kasus yang berdekatan dapat menunjukkan konsentrasi yang perlu diverifikasi. '
+        '**Istilah:** *spatial* berarti berbasis lokasi; *density* berarti kepadatan titik/kasus dalam radius tertentu. Kedekatan geografis bukan bukti bahwa penularan terjadi antarwilayah tersebut. '
+        '**Untuk kebijakan:** gunakan sebagai prioritas pemeriksaan lapangan dan investigasi hubungan epidemiologis.'
+    ),
+    'Vulnerable Population': (
+        '**Mengapa penting:** dampak penyakit tidak selalu merata pada semua kelompok. Model membantu mengidentifikasi karakteristik populasi yang secara prediktif berkaitan dengan outcome rentan. '
+        '**Istilah:** *vulnerable population* adalah kelompok yang memiliki kerentanan lebih tinggi menurut definisi dan data yang digunakan, bukan label klinis seseorang. '
+        '**Untuk kebijakan:** hasil dapat membantu penargetan surveilans, edukasi, perlindungan dan alokasi sumber daya.'
+    ),
+    'Temporal Forecasting': (
+        '**Mengapa penting:** keputusan logistik membutuhkan pandangan ke depan, misalnya kebutuhan tenaga, tempat tidur, obat, reagen dan kapasitas layanan. '
+        '**Istilah:** *forecast* adalah proyeksi statistik berdasarkan pola masa lalu; bukan kepastian jumlah kasus yang akan terjadi. '
+        '**Untuk kebijakan:** gunakan bersama tren aktual, EWS, intervensi dan perubahan pelaporan.'
+    ),
+    'Temporal Anomaly': (
+        '**Mengapa penting:** sistem perlu mengenali hari atau periode yang menyimpang dari pola normal area tersebut. '
+        '**Istilah:** *anomaly* adalah observasi yang tidak lazim menurut model; anomaly bukan sinonim wabah. '
+        '**Untuk kebijakan:** gunakan untuk memicu pemeriksaan kualitas data dan verifikasi epidemiologis lebih cepat.'
+    ),
+    'Change-Point': (
+        '**Mengapa penting:** perubahan mendadak pada pola kasus dapat menandai perubahan situasi yang perlu ditelusuri. '
+        '**Istilah:** *change point* adalah titik ketika pola tingkat kasus berbeda dari baseline sebelumnya. Baseline adalah pola pembanding yang dibentuk dari data sebelumnya. '
+        '**Untuk kebijakan:** telusuri apakah perubahan berasal dari transmisi, perubahan perilaku, intervensi, atau perubahan pencatatan/pelaporan.'
+    ),
+    'Growth-Risk': (
+        '**Mengapa penting:** peningkatan saat ini dapat berlanjut menjadi beban lebih tinggi dalam beberapa hari berikutnya. '
+        '**Istilah:** *growth risk* adalah risiko prediktif terhadap kenaikan beban kasus, bukan probabilitas terjadinya KLB. '
+        '**Untuk kebijakan:** gunakan untuk menentukan area yang perlu dipantau lebih rapat dan dipersiapkan kapasitasnya.'
+    ),
+    'Continuous Epidemiological': (
+        '**Mengapa penting:** satu indikator dapat menyesatkan. SI-HIS menggabungkan anomaly, perubahan baseline, pertumbuhan dan konteks spasial untuk membentuk prioritas screening. '
+        '**Istilah:** *continuous signal* adalah skor prioritas yang diperbarui mengikuti data, bukan probabilitas terkalibrasi. '
+        '**Untuk kebijakan:** gunakan sebagai urutan prioritas verifikasi, kemudian konfirmasi dengan epidemiologi lapangan.'
+    ),
+    'Spatial Neighbour': (
+        '**Mengapa penting:** kondisi suatu wilayah dapat dibaca bersama wilayah di sekitarnya. '
+        '**Istilah:** *neighbour feature* adalah ukuran kasus/area tetangga dalam radius tertentu. Ini menunjukkan konteks spasial, bukan bukti sumber penularan. '
+        '**Untuk kebijakan:** membantu menentukan apakah sebuah sinyal berdiri sendiri atau berada dalam konsentrasi geografis yang lebih luas.'
+    ),
+    'Spatio-Temporal': (
+        '**Mengapa penting:** sinyal epidemiologi lebih bermakna ketika perubahan waktu dan lokasi dibaca bersamaan. '
+        '**Istilah:** *spatio-temporal* berarti menggabungkan dimensi waktu dan tempat. Model memprediksi beban area berdasarkan pola temporal dan konteks tetangga. '
+        '**Untuk kebijakan:** membantu menentukan area yang perlu diverifikasi lebih dahulu.'
+    ),
+    'TIME + PERSON + PLACE': (
+        '**Mengapa penting:** epidemiologi tidak berhenti pada kapan dan di mana; karakteristik orang yang terdampak juga perlu diperhitungkan. '
+        '**Istilah:** TIME = kapan, PERSON = siapa/karakteristik populasi, PLACE = di mana. Model mengagregasikan umur, usia lanjut, komorbid, riwayat perjalanan dan kematian pada area-hari. '
+        '**Untuk kebijakan:** membantu menyusun prioritas surveilans yang lebih spesifik terhadap populasi dan wilayah.'
+    ),
+    'Disease-Specific': (
+        '**Mengapa penting:** setiap penyakit memiliki pola penularan, musim, dan dinamika yang berbeda. Model pertumbuhan karena itu dilatih terpisah per penyakit bila data mencukupi. '
+        '**Istilah:** *disease-specific model* berarti model tidak mencampurkan kurva penyakit yang berbeda. '
+        '**Untuk kebijakan:** interpretasikan hasil dalam konteks definisi kasus, surveilans dan aturan penyakit yang bersangkutan.'
+    ),
+    'Vulnerability Clustering': (
+        '**Mengapa penting:** kelompok dengan kombinasi karakteristik yang berbeda dapat memerlukan strategi surveilans yang berbeda. '
+        '**Istilah:** *clustering* adalah pengelompokan statistik berdasarkan kemiripan karakteristik; cluster bukan kategori klinis dan bukan bukti sebab-akibat. '
+        '**Untuk kebijakan:** gunakan untuk segmentasi populasi dan desain intervensi, lalu validasi dengan data lapangan.'
+    ),
+    'Validation & Dataset Drift': (
+        '**Mengapa penting:** model yang akurat pada data lama dapat berubah kinerjanya ketika pola populasi atau pencatatan berubah. '
+        '**Istilah:** *calibration* menilai kesesuaian probabilitas prediksi dengan kejadian yang diamati; *drift* berarti distribusi data berubah; PSI adalah salah satu alat screening drift. '
+        '**Untuk kebijakan:** model perlu dipantau dan divalidasi ulang sebelum dipercaya untuk penggunaan operasional.'
+    ),
+}
+
 def ml_narrative(ml):
     if not isinstance(ml,dict) or not ml:return 'ML layer belum dijalankan.'
-    return ('**SI-HIS menggunakan 12 komponen ML/AI epidemiologi dengan fungsi yang berbeda:** '
-            'prediksi severity, prediksi outbreak 7 hari, prediksi spasial, prediksi populasi rentan, forecasting temporal, anomaly detection, change-point detection, growth-risk, '
-            'spatio-temporal risk, TIME + PERSON + PLACE risk, disease-specific growth, vulnerability clustering, dan validation/drift monitoring. Setiap model harus dibaca melalui target, data, metrik, '
-            'feature importance, keterbatasan, dan status validasinya. Objek Pipeline tidak ditampilkan sebagai hasil analisis.')
+    return ('**SI-HIS ML bukan satu model tunggal, melainkan rangkaian analitik yang menjawab pertanyaan berbeda.** '
+            'Lima model utama membaca severity, beban 7 hari, spasial, populasi rentan dan forecast. Lapisan epidemiological intelligence menambahkan anomaly, change-point, growth-risk, '
+            'continuous signal, neighbour, spatio-temporal, TIME + PERSON + PLACE, disease-specific modelling, vulnerability clustering, serta validation dan drift monitoring. '
+            'Setiap hasil harus dibaca bersama definisi outcome, periode data, metode, metrik validasi dan keterbatasannya. '
+            '**Prinsipnya: ML menemukan sinyal dan memprioritaskan pemeriksaan; epidemiolog dan otoritas kesehatan mengonfirmasi makna serta tindakan.**')
 
 def _metric_value(v, digits=3):
     try:
@@ -706,6 +785,9 @@ def _render_ml_model_card(title, purpose, decision_question, result):
     st.markdown(f'### {title}')
     st.markdown(f'**Fungsi:** {purpose}')
     st.markdown(f'**Pertanyaan keputusan:** {decision_question}')
+    guidance = next((v for k,v in ML_MENU_GUIDANCE.items() if k.lower() in title.lower()), None)
+    if guidance:
+        st.info(guidance)
     if not isinstance(result,dict):
         st.info('Hasil model belum tersedia.')
         return

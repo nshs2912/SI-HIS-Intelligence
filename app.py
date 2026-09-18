@@ -98,8 +98,8 @@ def risk_narrative(risk):
     s=risk_summary(risk)
     if s.empty:return 'Belum ada faktor yang dapat dievaluasi.'
     sig=s[s['p-value'].notna() & (s['p-value']<.05)]
-    if sig.empty:return 'Pada data dan outcome yang dianalisis, belum ditemukan faktor dengan asosiasi statistik pada ambang p<0,05. Hal ini tidak membuktikan tidak adanya faktor risiko. Interpretasi harus mempertimbangkan OR, interval kepercayaan, ukuran sampel, confounding, bias, dan definisi outcome.'
-    return f"Ditemukan sinyal asosiasi statistik pada **{', '.join(sig['Faktor'].astype(str))}**. Ini adalah asosiasi pada dataset, bukan bukti kausal. OR/CI 95% dan model multivariat perlu dibaca untuk menilai besar, arah, dan kestabilan asosiasi setelah penyesuaian."
+    if sig.empty:return 'Pada data dan outcome yang dianalisis, belum ditemukan faktor dengan asosiasi statistik pada ambang p<0,05. Hal ini tidak membuktikan tidak adanya faktor risiko. Interpretasi harus mempertimbangkan crude OR (cOR), adjusted OR (aOR), interval kepercayaan, ukuran sampel, confounding, bias, dan definisi outcome.'
+    return f"Ditemukan sinyal asosiasi statistik pada **{', '.join(sig['Faktor'].astype(str))}**. Ini adalah asosiasi pada dataset, bukan bukti kausal. **cOR** menggambarkan asosiasi sebelum penyesuaian, sedangkan **aOR** dari model multivariat menggambarkan asosiasi setelah mengontrol variabel lain yang masuk model. Keduanya perlu dibaca bersama CI 95% dan p-value."
 
 def render_risk_factors(risk):
     if not isinstance(risk,dict):render_value(risk);return
@@ -115,7 +115,9 @@ def render_risk_factors(risk):
         ct=obj.get('crosstab')
         if isinstance(ct,pd.DataFrame):st.markdown('**Tabel silang**');st.dataframe(ct,use_container_width=True)
         ors=obj.get('or_by_group')
-        if isinstance(ors,pd.DataFrame) and not ors.empty:st.markdown('**Odds Ratio menurut kelompok**');st.dataframe(ors,use_container_width=True,hide_index=True)
+        if isinstance(ors,pd.DataFrame) and not ors.empty:
+            st.markdown('**Crude Odds Ratio (cOR) menurut kategori — referensi = kategori pertama yang tersedia**')
+            st.dataframe(ors,use_container_width=True,hide_index=True)
 
 def _distribution_narrative(df,label):
     if not isinstance(df,pd.DataFrame) or df.empty:return ''

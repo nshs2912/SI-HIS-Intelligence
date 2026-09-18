@@ -36,7 +36,9 @@ Kemenkes · Dinkes · Puskesmas · Doctor · NutriMed / Mobile
 | `core/scope.py` | Province → district → kecamatan → village → puskesmas → disease scope |
 | `core/analytics.py` | Core epidemiological/time/spatial analytics restored from validated prototype |
 | `core/statistics.py` | Age grouping, bivariate and multivariable logistic analysis |
-| `core/ml_engine.py` | ML training, prediction and robust forecasting |
+| `core/ml_engine.py` | ML training, prediction and robust forecasting | 
+| `core/epidemiology_ml.py` | Epidemiological anomaly, growth, spatial, vulnerability and TIME+PERSON+PLACE ML | 
+| `core/ml_validation.py` | Probability calibration and dataset-drift screening |
 | `core/engine.py` | Stateless facade that connects scope to analytics/ML |
 | `core/national_dummy.py` | Synthetic national dataset generator |
 | `core/orchestration.py` | Continuous intelligence lifecycle and routing contract |
@@ -78,6 +80,10 @@ The bundled dataset is **synthetic only**. It is intended to exercise the full n
    - transparent continuous-signal prioritization score
    - TIME + PERSON + PLACE risk model
    - disease-specific growth-risk models
+   - probability calibration summary (Brier, calibration gap, ROC-AUC, PR-AUC)
+   - dataset drift screening with PSI
+
+Validation layer: probability quality is screened with Brier/calibration gap, while distribution drift is screened with PSI. These are monitoring indicators, not acceptance thresholds or epidemiological conclusions.
 
 ML output is decision support. It requires historical labelled data, temporal validation, calibration, external validation, drift monitoring, auditability and human oversight before operational use. Epidemiological ML signals are never legal KLB determinations; derived targets must be versioned and validated against applicable disease-specific rules.
 

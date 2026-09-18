@@ -104,8 +104,8 @@ def _trias_summary(df,national_disease_df,disease,geographic_scope):
 
 
 def _binary_outcome_from_disease(df,disease):
-    disease_case=_disease_per_case(df).eq(disease)
-    return disease_case.astype(int)
+    """Disease outcome on the full scoped population: 1=target disease, 0=other/non-target."""
+    return _disease_per_case(df).eq(disease).astype(int)
 
 
 def _severity_outcome(df):

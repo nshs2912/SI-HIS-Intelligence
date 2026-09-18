@@ -690,19 +690,108 @@ def vulnerable_narrative(v):
 
 def ml_narrative(ml):
     if not isinstance(ml,dict) or not ml:return 'ML layer belum dijalankan.'
-    sections=[
-        ('1. Case Severity Prediction','Memprediksi probabilitas suatu kasus menjadi berat berdasarkan umur, jenis kelamin, pekerjaan, imunisasi, komorbid, perjalanan dan faktor risiko lain. Digunakan untuk membantu triase, prioritas pemantauan dan kesiapan pelayanan.'),
-        ('2. KLB / Outbreak 7-Day Prediction','Memprediksi apakah suatu desa berpotensi mencapai ambang beban kasus 7 hari berikutnya berdasarkan sinyal temporal seperti kasus harian, rolling 7 hari, lag dan pertumbuhan. Ini adalah early-warning model, bukan penetapan legal KLB.'),
-        ('3. Spatial Outbreak Prediction','Menggabungkan sinyal temporal dan informasi lokasi untuk memperkirakan area yang berpotensi mengalami outbreak berikutnya. Fungsinya membantu menentukan wilayah yang perlu dipantau atau diverifikasi lebih dahulu.'),
-        ('4. Vulnerable Population Prediction','Memprediksi probabilitas kelompok/kasus memiliki karakteristik outcome rentan menggunakan variabel person dan faktor paparan. Hasilnya membantu menentukan prioritas surveillance dan perlindungan kelompok rentan, bukan diagnosis individual.'),
-        ('5. Temporal Forecasting','Memproyeksikan jumlah kasus beberapa hari ke depan. SI-HIS menggunakan ensemble forecasting dan backtest temporal untuk membantu memperkirakan beban layanan, kebutuhan kesiapsiagaan dan perubahan tren.')
-    ]
-    out=['**SI-HIS menggunakan 5 lapisan ML/AI untuk fungsi yang berbeda.** ML tidak menggantikan analisis epidemiologi TIME + PERSON + PLACE; ML digunakan untuk prediction/forecasting setelah sinyal epidemiologi dibaca.']
-    for title,desc in sections:
-        out.append(f'### {title}\n{desc}')
-    out.append('**Cara membaca metrik model:** ROC-AUC menilai diskriminasi; PR-AUC penting ketika outcome positif jarang; recall menunjukkan proporsi target positif yang tertangkap; specificity menunjukkan proporsi non-target yang tersaring; precision menunjukkan proporsi prediksi positif yang benar; F1 menyeimbangkan precision dan recall; Brier menilai kualitas probabilitas dan umumnya semakin kecil semakin baik. Feature importance menunjukkan kontribusi prediktif, bukan hubungan sebab-akibat.')
-    out.append('**Prinsip interpretasi:** model dengan accuracy tinggi belum tentu berguna bila outcome positif jarang. Perhatikan terutama recall, precision, PR-AUC, kalibrasi/Brier dan distribusi kelas. Setiap model harus divalidasi pada data eksternal sebelum digunakan untuk keputusan operasional.')
-    return '\n\n'.join(out)
+    return ('**SI-HIS menggunakan 5 lapisan ML/AI dengan fungsi yang berbeda:** '
+            'prediksi severity, prediksi outbreak 7 hari, prediksi spasial, prediksi populasi rentan, '
+            'dan forecasting temporal. Setiap model harus dibaca melalui target, data, metrik, '
+            'feature importance, keterbatasan, dan status validasinya. Objek Pipeline tidak ditampilkan sebagai hasil analisis.')
+
+def _metric_value(v, digits=3):
+    try:
+        if v is None or not np.isfinite(float(v)): return 'N/A'
+        return f'{float(v):.{digits}f}'
+    except Exception:
+        return 'N/A'
+
+def _render_ml_model_card(title, purpose, decision_question, result):
+    st.markdown(f'### {title}')
+    st.markdown(f'**Fungsi:** {purpose}')
+    st.markdown(f'**Pertanyaan keputusan:** {decision_question}')
+    if not isinstance(result,dict):
+        st.info('Hasil model belum tersedia.')
+        return
+    if result.get('status') != 'ok':
+        st.warning(f"Model belum menghasilkan metrik yang valid: {result.get('message','Data belum mencukupi.')}")
+        return
+    metrics=result.get('metrics',{})
+    m1,m2,m3,m4=st.columns(4)
+    m1.metric('ROC-AUC',_metric_value(metrics.get('roc_auc')))
+    m2.metric('PR-AUC',_metric_value(metrics.get('pr_auc')))
+    m3.metric('Recall',_metric_value(metrics.get('recall')))
+    m4.metric('Specificity',_metric_value(metrics.get('specificity')))
+    m5,m6,m7,m8=st.columns(4)
+    m5.metric('Precision',_metric_value(metrics.get('precision')))
+    m6.metric('F1',_metric_value(metrics.get('f1')))
+    m7.metric('Brier',_metric_value(metrics.get('brier')))
+    m8.metric('Accuracy',_metric_value(metrics.get('accuracy')))
+    st.markdown(f"**Cara membaca:** recall={_metric_value(metrics.get('recall'))} menunjukkan proporsi outcome positif yang tertangkap; specificity={_metric_value(metrics.get('specificity'))} menunjukkan proporsi non-target yang tersaring; PR-AUC={_metric_value(metrics.get('pr_auc'))} penting ketika outcome positif relatif jarang. Brier={_metric_value(metrics.get('brier'))} menilai kualitas probabilitas, umumnya semakin kecil semakin baik.")
+    if result.get('train_rows') is not None or result.get('test_rows') is not None:
+        st.caption(f"Validasi: holdout temporal | training={result.get('train_rows','N/A'):,} | holdout={result.get('test_rows','N/A'):,} | positive rate={float(result.get('positive_rate',0))*100:.1f}%")
+    fi=result.get('feature_importance')
+    if isinstance(fi,pd.DataFrame) and not fi.empty:
+        st.markdown('**Feature importance — kontribusi prediktif, bukan kausalitas**')
+        st.dataframe(fi.head(10),use_container_width=True,hide_index=True)
+    with st.expander('🔧 Detail teknis model',expanded=False):
+        model=result.get('model')
+        if model is not None:
+            st.write(f'Model terlatih: {type(model).__name__}')
+            st.caption('Konfigurasi pipeline disimpan di backend dan tidak diperlakukan sebagai hasil epidemiologi.')
+        st.write(f"Jumlah fitur: {len(result.get('features',[]))}")
+        st.write(f"Fitur: {', '.join(map(str,result.get('features',[])))}")
+        if result.get('holdout_start') is not None: st.write(f"Awal data holdout temporal: {result.get('holdout_start')}")
+    if result.get('metrics',{}).get('Narrative'):
+        st.info(result['metrics']['Narrative'])
+
+def _render_ml_forecast(result):
+    st.markdown('### 5. Temporal Forecasting')
+    st.markdown('**Fungsi:** memproyeksikan jumlah kasus ke depan untuk membantu membaca kemungkinan beban layanan, kesiapsiagaan, dan arah tren.')
+    st.markdown('**Pertanyaan keputusan:** berapa kisaran kasus yang mungkin terjadi dalam horizon forecast dan kapan puncak model diperkirakan?')
+    if not isinstance(result,dict) or result.get('status')!='ok':
+        st.warning(f"Forecast belum tersedia: {result.get('message','Data belum mencukupi.') if isinstance(result,dict) else 'hasil tidak tersedia.'}")
+        return
+    m1,m2,m3=st.columns(3)
+    m1.metric('Horizon',f"{len(result.get('forecast',[]))} hari")
+    m2.metric('Peak forecast',f"{float(result.get('peak_value',0)):.1f} kasus")
+    peak=result.get('peak_date');m3.metric('Tanggal peak',pd.to_datetime(peak).strftime('%d %b %Y') if peak is not None else 'N/A')
+    st.markdown(f"**Backtest MAE:** {_metric_value(result.get('mae'),2)} | **RMSE:** {_metric_value(result.get('rmse'),2)}")
+    weights=result.get('weights',{})
+    if weights: st.write('Bobot ensemble:',{k:round(float(v),3) for k,v in weights.items()})
+    dates=pd.to_datetime(result.get('dates',[]),errors='coerce')
+    forecast=result.get('forecast',[])
+    if len(dates)==len(forecast) and len(forecast):
+        chart=pd.DataFrame({'Tanggal':dates,'Forecast':forecast}).set_index('Tanggal')
+        st.line_chart(chart)
+    with st.expander('📖 Cara membaca forecasting',expanded=False):
+        st.markdown('Forecast adalah estimasi model, bukan jumlah kasus yang pasti terjadi. MAE/RMSE menggambarkan kesalahan pada backtest; semakin kecil umumnya semakin baik. Puncak forecast adalah nilai tertinggi yang diproyeksikan dalam horizon. Gunakan bersama kurva epidemik, EWS, Rₜ, dan konteks intervensi.')
+
+def render_ml_report(ml):
+    st.markdown('### 🧠 AI/ML Intelligence Report')
+    st.caption('Lima lapisan ML/AI SI-HIS. Setiap lapisan memiliki target dan fungsi berbeda. Model teknis tidak ditampilkan sebagai pengganti hasil analisis.')
+    if not isinstance(ml,dict) or not ml:
+        st.info('ML layer belum dijalankan.')
+        return
+    _render_ml_model_card(
+        '1. Case Severity Prediction',
+        'Memprediksi probabilitas kasus masuk outcome severity yang didefinisikan sistem. Pada implementasi saat ini, target demo severity diturunkan dari kematian atau status rawat inap.',
+        'Kasus mana yang perlu mendapat prioritas pemantauan/triase berdasarkan probabilitas outcome model?',
+        ml.get('case_severity'))
+    _render_ml_model_card(
+        '2. KLB / Outbreak 7-Day Prediction',
+        'Memprediksi apakah beban kasus 7 hari berikutnya pada desa mencapai threshold turunan dari distribusi historis. Threshold ini adalah threshold model, bukan definisi legal KLB.',
+        'Desa mana yang perlu dipantau lebih dini karena sinyal temporalnya mengarah ke peningkatan beban 7 hari?',
+        ml.get('klb'))
+    _render_ml_model_card(
+        '3. Spatial Outbreak Prediction',
+        'Menggabungkan sinyal temporal dan lokasi untuk memperkirakan area yang berpotensi mengalami peningkatan outbreak pada horizon berikutnya.',
+        'Wilayah mana yang perlu diprioritaskan untuk verifikasi spasial dan investigasi?',
+        ml.get('spatial'))
+    _render_ml_model_card(
+        '4. Vulnerable Population Prediction',
+        'Memprediksi outcome rentan berdasarkan karakteristik person dan paparan. Hasilnya dipakai untuk surveillance/population prioritization, bukan diagnosis individual.',
+        'Kelompok atau karakteristik kasus mana yang perlu mendapat perhatian surveillance lebih lanjut?',
+        ml.get('vulnerable'))
+    _render_ml_forecast(ml.get('forecast'))
+    st.markdown('### 📌 Cara Membaca Hasil ML secara Keseluruhan')
+    st.markdown('1. **Mulai dari target:** pahami apa yang sebenarnya diprediksi.\n2. **Lihat holdout temporal:** jangan hanya melihat training performance.\n3. **Perhatikan PR-AUC, recall, precision, specificity dan Brier**, terutama bila outcome positif jarang.\n4. **Baca feature importance sebagai sinyal prediktif**, bukan faktor penyebab.\n5. **Hubungkan prediction dengan TIME + PERSON + PLACE dan outcome epidemiologis** sebelum membuat keputusan.\n6. **Validasi eksternal diperlukan** sebelum model digunakan sebagai dasar keputusan operasional.')
 
 st.sidebar.header('⚙️ Panel Kontrol & Filter');source=st.sidebar.radio('Sumber Data',['Gunakan Data Simulasi (AI-Ready)','Upload File Excel/CSV Custom'])
 if source.startswith('Gunakan'):df_raw=generate_data_simulasi().copy();st.sidebar.success(f'✅ {len(df_raw):,} data dimuat.')

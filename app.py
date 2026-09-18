@@ -307,7 +307,7 @@ else:
         spatial=result.get('spatial')
         show_tab_resume('Resume Spatial Epidemiology',spatial_narrative(spatial),'peta, cluster dan episentrum di bawah')
         st.caption('Analisis spasial, cluster dan episentrum digunakan untuk memperkuat interpretasi PLACE pada resume epidemiologi.');
-render_value(spatial,'Hasil DBSCAN')
+        render_value(spatial,'Hasil DBSCAN')
         if isinstance(spatial,pd.DataFrame) and not spatial.empty and {'Latitude','Longitude'}.issubset(spatial.columns):
             geo=spatial.dropna(subset=['Latitude','Longitude'])
             if not geo.empty:

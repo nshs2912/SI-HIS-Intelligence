@@ -10,6 +10,8 @@ from core.epidemiology_ml import (
     cluster_population_vulnerability,
     rank_areas_by_continuous_signal,
     train_growth_risk_model,
+    train_spatiotemporal_risk_model,
+    train_time_person_place_risk_model,
 )
 
 def sample_data(n_days=90):
@@ -49,9 +51,13 @@ def test_ml_epi_smoke():
     vp = cluster_population_vulnerability(df)
     rank = rank_areas_by_continuous_signal(df)
     growth = train_growth_risk_model(df)
+    st = train_spatiotemporal_risk_model(df)
+    ptp = train_time_person_place_risk_model(df)
     assert {"Anomaly_Flag","Anomaly_Score"}.issubset(an.columns)
     assert {"Change_Point_Flag","Change_Z"}.issubset(cp.columns)
     assert {"Neighbor_Cases","Neighbor_Areas"}.issubset(sp.columns)
     assert vp["status"] in {"ok","error"}
     assert rank.empty or "Continuous_Signal_Score" in rank.columns
     assert growth["status"] in {"ok","error"}
+    assert st["status"] in {"ok","error"}
+    assert ptp["status"] in {"ok","error"}

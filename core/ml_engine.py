@@ -15,6 +15,8 @@ from sklearn.metrics import (accuracy_score, average_precision_score, brier_scor
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
+from sklearn.metrics import average_precision_score
+from .epidemiology_ml import detect_temporal_anomalies, detect_change_points, build_spatial_neighbor_features, train_growth_risk_model, predict_growth_risk, cluster_population_vulnerability, rank_areas_by_continuous_signal, build_continuous_epidemiology_signals
 import joblib
 
 RANDOM_STATE = 42
@@ -188,3 +190,17 @@ def save_model(result,path):
     return None
 
 def load_model(path):return joblib.load(path)
+
+
+def train_epidemiological_intelligence(df):
+    """Run ML-oriented epidemiological screening bundle."""
+    result = build_continuous_epidemiology_signals(df)
+    growth = train_growth_risk_model(df)
+    ranking = rank_areas_by_continuous_signal(df)
+    vulnerability = cluster_population_vulnerability(df)
+    result.update({"growth_risk": growth, "continuous_ranking": ranking, "vulnerability_clustering": vulnerability})
+    return result
+
+
+def predict_epidemiological_growth(df, model_result):
+    return predict_growth_risk(df, model_result)

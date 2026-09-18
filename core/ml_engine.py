@@ -16,7 +16,7 @@ from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import OneHotEncoder
 from statsmodels.tsa.holtwinters import ExponentialSmoothing
 from sklearn.metrics import average_precision_score
-from .epidemiology_ml import detect_temporal_anomalies, detect_change_points, build_spatial_neighbor_features, train_growth_risk_model, predict_growth_risk, train_spatiotemporal_risk_model, predict_spatiotemporal_risk, train_disease_specific_growth_models, cluster_population_vulnerability, rank_areas_by_continuous_signal, build_continuous_epidemiology_signals
+from .epidemiology_ml import detect_temporal_anomalies, detect_change_points, build_spatial_neighbor_features, train_growth_risk_model, predict_growth_risk, train_spatiotemporal_risk_model, predict_spatiotemporal_risk, train_time_person_place_risk_model, train_disease_specific_growth_models, cluster_population_vulnerability, rank_areas_by_continuous_signal, build_continuous_epidemiology_signals
 import joblib
 
 RANDOM_STATE = 42
@@ -199,8 +199,9 @@ def train_epidemiological_intelligence(df):
     ranking = rank_areas_by_continuous_signal(df)
     vulnerability = cluster_population_vulnerability(df)
     spatiotemporal = train_spatiotemporal_risk_model(df)
+    time_person_place = train_time_person_place_risk_model(df)
     disease_models = train_disease_specific_growth_models(df)
-    result.update({"growth_risk": growth, "spatiotemporal_risk": spatiotemporal, "disease_specific_growth": disease_models, "continuous_ranking": ranking, "vulnerability_clustering": vulnerability})
+    result.update({"growth_risk": growth, "spatiotemporal_risk": spatiotemporal, "time_person_place_risk": time_person_place, "disease_specific_growth": disease_models, "continuous_ranking": ranking, "vulnerability_clustering": vulnerability})
     return result
 
 

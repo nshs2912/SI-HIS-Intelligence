@@ -14,7 +14,7 @@ from .analytics import deteksi_bentuk_kurva, deteksi_gelombang, hitung_effective
 from .epidemiology import analyze_mortality, analyze_risk, analyze_trias
 from .epidemiology.pipeline import classify_temporal_pattern_for_disease, resolve_disease_profile, validate_scope_for_special_analysis
 from .forecasting import holt_winters_forecast
-from .ml_engine import train_case_severity, train_klb_prediction, train_spatial_outbreak, train_vulnerable_population
+from .ml_engine import train_case_severity, train_klb_prediction, train_spatial_outbreak, train_vulnerable_population, robust_forecast
 from .scope import QueryScope, apply_scope, scope_label
 from .spatial import compute_epicenter, analyze_spatial
 from .statistics import hitung_bivariat_lengkap
@@ -163,6 +163,14 @@ class IntelligenceEngine:
         common.update({"person":person,"place":trias["place"],"trias_summary":trias_summary,"time":epi,"analysis_dataframe":work.copy(deep=True),"mortality":analyze_mortality(work),"risk":analyze_risk(work),"risk_factors":outcome_analyses["Penyakit"],"outcome_analyses":outcome_analyses,"vulnerable":identifikasi_vulnerable_profile(work),"ews":early_warning(epi),"rt":hitung_effective_rt(epi) if not epi.empty else None,"waves":waves,"forecast":holt_winters_forecast(epi,forecast_days),"spatial":spatial,"epicenters":compute_epicenter(spatial),"temporal_interpretation":classify_temporal_pattern_for_disease(profile,len(waves)),"epidemic_curve_classification":curve,"ml":self.ml_train(work) if include_ml else {"enabled":False,"message":"ML layer tidak dijalankan."}})
         return common
 
-    def ml_train(self,df):return {"case_severity":train_case_severity(df),"klb":train_klb_prediction(df),"spatial":train_spatial_outbreak(df),"vulnerable":train_vulnerable_population(df)}
+    def ml_train(self,df):
+        daily=analyze_trias(df)["time"]
+        return {
+            "case_severity":train_case_severity(df),
+            "klb":train_klb_prediction(df),
+            "spatial":train_spatial_outbreak(df),
+            "vulnerable":train_vulnerable_population(df),
+            "forecast":robust_forecast(daily,14)
+        }
 
 SIHISIntelligenceEngine=IntelligenceEngine

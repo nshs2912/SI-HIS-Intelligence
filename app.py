@@ -5,6 +5,7 @@ import pandas as pd
 import streamlit as st
 from streamlit_folium import st_folium
 from core.analytics import REQUIRED_COLUMNS, generate_excel_template, generate_data_simulasi, get_wib_time
+from core.downloads import build_evaluation_excel, build_evaluation_csv, build_resume_pdf, data_sha256
 from core.engine import SIHISIntelligenceEngine
 from core.scope import QueryScope
 warnings.filterwarnings('ignore')
@@ -26,6 +27,27 @@ def show_resume(text,detail='tabel'):
 def show_tab_resume(title,text,detail='analisis di bawah'):
     st.markdown(f'### 🧭 {title}')
     show_resume(text,detail)
+
+def build_export_metadata(df, disease, label, source_name, sel_prov, sel_kab, sel_kec, sel_desa, sel_pusk):
+    sha = data_sha256(df)
+    return {
+        'Produk': 'SI-HIS Intelligence',
+        'Jenis Dokumen': 'Resume Epidemiologi + Datasheet Verifikasi',
+        'Penyakit': disease,
+        'Scope Analisis': label,
+        'Provinsi Filter': sel_prov,
+        'Kabupaten/Kota Filter': sel_kab,
+        'Kecamatan Filter': sel_kec,
+        'Desa/Kelurahan Filter': sel_desa,
+        'Puskesmas Filter': sel_pusk,
+        'Sumber Data': source_name,
+        'Jumlah Baris yang Dianalisis': len(df),
+        'Jumlah Kolom': len(df.columns),
+        'Waktu Ekspor': get_wib_time()['full'],
+        'SHA-256 Datasheet': sha,
+        'Catatan Verifikasi': 'Datasheet berisi baris yang benar-benar digunakan pada scope analisis ini.'
+    }
+
 
 def render_scoring_explanation():
     st.markdown('### ❓ Mengapa Perlu Skoring?')
@@ -600,7 +622,22 @@ else:
     tabs=st.tabs(['🚨 AI Prediction & Recommendation','📊 Trias Epidemiologi (Detail)','📈 Kurva Epidemik & Prediksi','🗺️ Peta Spasial & AI DBSCAN','🧪 Analisis Faktor Risiko','🤖 Analisis ML'])
     with tabs[0]:
         st.markdown('### 🚨 AI Prediction & Recommendation')
-        show_tab_resume('Resume AI Prediction & Recommendation',ai_prediction_narrative(result,sel_disease,label),'alert, EWS, prediction, scoring dan rekomendasi di bawah')
+        resume_text=ai_prediction_narrative(result,sel_disease,label)
+        analyzed_df=result.get('analysis_dataframe')
+        if not isinstance(analyzed_df,pd.DataFrame) or analyzed_df.empty:
+            analyzed_df=df_raw.copy()
+        export_meta=build_export_metadata(analyzed_df,sel_disease,label,'Simulasi' if source.startswith('Gunakan') else getattr(uploaded,'name','Upload'),sel_prov,sel_kab,sel_kec,sel_desa,sel_pusk)
+        pdf_bytes=build_resume_pdf(f'SI-HIS Resume Epidemiologi — {sel_disease}',resume_text,export_meta)
+        xlsx_bytes=build_evaluation_excel(analyzed_df,export_meta)
+        csv_bytes=build_evaluation_csv(analyzed_df)
+        st.markdown('#### 📥 Paket Verifikasi & Konfirmasi')
+        st.caption('PDF adalah hardcopy resume analisis. Datasheet adalah baris data yang benar-benar dianalisis pada scope ini, sehingga tim Kemenkes/Dinkes dapat melakukan verifikasi dan konfirmasi langsung tanpa meminta ulang datasheet ke Dinkes sumber.')
+        c1,c2,c3=st.columns(3)
+        c1.download_button('📄 Download Resume PDF',pdf_bytes,f'SI-HIS_Resume_{sel_disease}_{label}.pdf','application/pdf',use_container_width=True)
+        c2.download_button('📊 Download Datasheet Excel',xlsx_bytes,f'SI-HIS_Datasheet_Verifikasi_{sel_disease}_{label}.xlsx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',use_container_width=True)
+        c3.download_button('📋 Download Datasheet CSV',csv_bytes,f'SI-HIS_Datasheet_Verifikasi_{sel_disease}_{label}.csv','text/csv',use_container_width=True)
+        st.info(f"🔐 **SHA-256 datasheet:** `{export_meta['SHA-256 Datasheet']}` — gunakan nilai ini untuk memastikan datasheet yang diverifikasi identik dengan data yang dianalisis.")
+        show_tab_resume('Resume AI Prediction & Recommendation',resume_text,'alert, EWS, prediction, scoring dan rekomendasi di bawah')
         klb=result.get('klb',{})
         if isinstance(klb,dict):
             status=klb.get('status',klb.get('level',klb.get('classification','')))

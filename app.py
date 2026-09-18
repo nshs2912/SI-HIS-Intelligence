@@ -23,6 +23,10 @@ def show_resume(text,detail='tabel'):
     st.caption(f"Untuk lebih detail bisa dilihat pada {detail} di bawah ini.")
     st.markdown('''**DISCLAIMER PENTING**\n\nHasil analisis berfungsi sebagai **Decision Support System (DSS)**. Keputusan operasional tetap berada di bawah wewenang otoritas kesehatan.''')
 
+def show_tab_resume(title,text,detail='analisis di bawah'):
+    st.markdown(f'### 🧭 {title}')
+    show_resume(text,detail)
+
 def render_scoring_explanation():
     st.markdown('### ❓ Mengapa Perlu Skoring?')
     st.markdown('''Dalam analisis risiko epidemiologi, kita menghadapi masalah klasik: **jumlah kasus adalah angka absolut** (misal: 50 kasus), sedangkan **CFR adalah persentase** (misal: 5%). Keduanya memiliki satuan dan skala yang berbeda, sehingga tidak bisa langsung dijumlahkan.''')
@@ -218,7 +222,7 @@ def curve_narrative(curve,disease):
 
 def forecast_render(fc):
     if not isinstance(fc,dict):render_value(fc);return
-    table=pd.DataFrame({'Tanggal':pd.to_datetime(fc.get('dates',[]),errors='coerce'),'Forecast':fc.get('forecast',[]),'Lower 95%':fc.get('lower',[]),'Upper 95%':fc.get('upper',[])});show_resume(f"Model **{fc.get('model','Holt-Winters')}** memperkirakan tren **{fc.get('trend','-')}**. Forecast adalah estimasi model dan intervalnya menunjukkan ketidakpastian, bukan jumlah kasus yang pasti terjadi.")
+    table=pd.DataFrame({'Tanggal':pd.to_datetime(fc.get('dates',[]),errors='coerce'),'Forecast':fc.get('forecast',[]),'Lower 95%':fc.get('lower',[]),'Upper 95%':fc.get('upper',[])});st.caption(f"Model **{fc.get('model','Holt-Winters')}** memperkirakan tren **{fc.get('trend','-')}**. Forecast adalah estimasi model dan intervalnya menunjukkan ketidakpastian, bukan jumlah kasus yang pasti terjadi.")
     if not table.empty:st.line_chart(table.set_index('Tanggal')[['Forecast','Lower 95%','Upper 95%']]);st.dataframe(table,use_container_width=True,hide_index=True)
 
 def vulnerable_narrative(v):
@@ -253,16 +257,11 @@ else:
     result=engine.analyze(df_raw,scope=scope,include_ml=include_ml,mode='epidemiology');label=sel_kab if sel_kab!='Semua Kabupaten/Kota' else (sel_prov if sel_prov!='Semua Provinsi' else 'Indonesia');st.markdown(f'## 🧬 Analisis Epidemiologi — {sel_disease}');st.caption(f'Scope: **{sel_disease} — {label}** | TIME + PERSON + PLACE')
     if not result.get('eligible',False):st.warning('Analisis epidemiologi belum dapat dijalankan.');render_value(result.get('eligibility'));st.stop()
     total=int(result['overview']['total_cases']);mortality=result.get('mortality');deaths=int(mortality.get('deaths',mortality.get('meninggal',0)) or 0) if isinstance(mortality,dict) else 0;cfr=deaths/total*100 if total else 0;a,b,c=st.columns(3);a.metric(f'Total {sel_disease}',f'{total:,}');b.metric('Meninggal',f'{deaths:,}');c.metric('CFR — tingkat kematian akibat penyakit',f'{cfr:.2f}%')
-    # Navigation utama ditempatkan sebelum resume agar pengguna dapat memilih mode eksplorasi terlebih dahulu.
+    # Navigation Bar utama tetap horizontal di atas. Setiap tab memiliki resume sendiri tepat di bawah tab.
     tabs=st.tabs(['🚨 AI Prediction & Recommendation','📊 Trias Epidemiologi (Detail)','📈 Kurva Epidemik & Prediksi','🗺️ Peta Spasial & AI DBSCAN','🧪 Analisis Faktor Risiko','🤖 Analisis ML'])
-    st.markdown('### 🧠 Resume Epidemiologi Terintegrasi — TIME + PERSON + PLACE')
-    show_resume(epidemiology_master_narrative(result,label,sel_disease),'tabel dan grafik analisis di bawah')
-    if isinstance(result.get('priority_score'),pd.DataFrame):
-        st.markdown('#### 🎯 Prioritas Epidemiologis — Burden Score & CFR Score')
-        st.dataframe(result['priority_score'],use_container_width=True,hide_index=True)
-        render_scoring_explanation()
     with tabs[0]:
         st.markdown('### 🚨 AI Prediction & Recommendation')
+        show_tab_resume('Resume AI Prediction & Recommendation',ews_narrative(result.get('ews'),result.get('rt')),'alert, EWS, prediction dan rekomendasi di bawah')
         klb=result.get('klb',{})
         if isinstance(klb,dict):
             status=klb.get('status',klb.get('level',klb.get('classification','')))
@@ -271,7 +270,6 @@ else:
                 if 'ALERT' in s or 'INVESTIGATION' in s or 'KLB' in s: st.error(f'🔴 **ALERT SURVEILANS: {status}**')
                 elif 'WARNING' in s: st.warning(f'🟡 **EARLY WARNING: {status}**')
                 else: st.info(f'**Status surveilans:** {status}')
-        show_resume(ews_narrative(result.get('ews'),result.get('rt')),'indikator EWS dan hasil investigasi di bawah')
         render_value(result.get('ews'),'Indikator EWS');render_value(result.get('rt'),'Rₜ')
         st.markdown('### Rekomendasi AI untuk investigasi dan pencegahan')
         rec=result.get('recommendations',result.get('recommendation'))
@@ -279,7 +277,12 @@ else:
         else: show_resume('SI-HIS mengarahkan tindakan berdasarkan sinyal yang terdeteksi: penyelidikan epidemiologi, penemuan kasus aktif, penelusuran kontak, analisis TIME + PERSON + PLACE, analisis cluster/episentrum, serta pengendalian faktor risiko sesuai penyakit dan temuan lapangan.')
     with tabs[1]:
         st.markdown('### 📊 Trias Epidemiologi (Detail)')
-        tri=result.get('trias_summary',{});st.caption('Detail TIME + PERSON + PLACE berikut mendukung resume epidemiologi terintegrasi di atas.')
+        show_tab_resume('Resume TIME + PERSON + PLACE + OUTCOME',epidemiology_master_narrative(result,label,sel_disease),'tabel/grafik Trias dan scoring di bawah')
+        if isinstance(result.get('priority_score'),pd.DataFrame):
+            st.markdown('#### 🎯 Prioritas Epidemiologis — Burden Score & CFR Score')
+            st.dataframe(result['priority_score'],use_container_width=True,hide_index=True)
+            render_scoring_explanation()
+        tri=result.get('trias_summary',{})
         top10=tri.get('top10_province') if isinstance(tri,dict) else None
         if isinstance(top10,pd.DataFrame) and not top10.empty:render_value(top10,'10 Besar Wilayah')
         render_value(result.get('place'),'PLACE');render_value(result.get('person'),'PERSON')
@@ -292,7 +295,7 @@ else:
         render_value(mortality,'MORTALITY / CFR');render_value(result.get('vulnerable'),'Vulnerable Population')
     with tabs[2]:
         st.markdown('### 📈 Kurva Epidemik & Prediksi')
-        st.caption('Kurva epidemik dan forecast mendukung interpretasi temporal pada resume epidemiologi terintegrasi di atas.')
+        show_tab_resume('Resume Kurva Epidemik & Prediksi',curve_narrative(result.get('epidemic_curve_classification'),sel_disease),'kurva, gelombang, forecast dan Rₜ di bawah')
         t=result.get('time')
         if isinstance(t,pd.DataFrame) and not t.empty:
             chart=t.copy();chart['Tanggal Sakit']=pd.to_datetime(chart['Tanggal Sakit'],errors='coerce');valid_chart=chart.dropna(subset=['Tanggal Sakit'])
@@ -301,7 +304,10 @@ else:
         if waves:render_value(waves,'Gelombang Temporal')
     with tabs[3]:
         st.markdown('### 🗺️ Peta Spasial & AI DBSCAN')
-        spatial=result.get('spatial');st.caption('Analisis spasial, cluster dan episentrum digunakan untuk memperkuat interpretasi PLACE pada resume epidemiologi terintegrasi.');render_value(spatial,'Hasil DBSCAN')
+        spatial=result.get('spatial')
+        show_tab_resume('Resume Spatial Epidemiology',spatial_narrative(spatial),'peta, cluster dan episentrum di bawah')
+        st.caption('Analisis spasial, cluster dan episentrum digunakan untuk memperkuat interpretasi PLACE pada resume epidemiologi.');
+render_value(spatial,'Hasil DBSCAN')
         if isinstance(spatial,pd.DataFrame) and not spatial.empty and {'Latitude','Longitude'}.issubset(spatial.columns):
             geo=spatial.dropna(subset=['Latitude','Longitude'])
             if not geo.empty:
@@ -311,7 +317,9 @@ else:
         render_value(result.get('epicenters'),'Episentrum / Titik Prioritas')
         st.caption('Cluster adalah hasil kepadatan spasial. Episentrum adalah lokasi konsentrasi prioritas dalam dataset; keduanya bukan otomatis sumber penularan dan harus dikaitkan dengan TIME, hubungan epidemiologis dan investigasi lapangan.')
     with tabs[4]:
-        st.markdown('### 🧪 Analisis Faktor Risiko');st.markdown('#### Detail Analisis Faktor Risiko')
+        st.markdown('### 🧪 Analisis Faktor Risiko')
+        show_tab_resume('Resume Analisis Faktor Risiko',risk_narrative(result.get('risk_factors')),'tabel bivariat, multivariat dan outcome di bawah')
+        st.markdown('#### Detail Analisis Faktor Risiko')
         s=risk_summary(result.get('risk_factors'))
         if not s.empty:st.dataframe(s,use_container_width=True,hide_index=True)
         outcomes=result.get('outcome_analyses',{})
@@ -320,7 +328,9 @@ else:
                 with st.expander(f'Outcome: {outcome_name}',expanded=(outcome_name=='Penyakit')):render_value(outcome)
         render_risk_factors(result.get('risk_factors'))
     with tabs[5]:
-        st.markdown('### 🤖 Analisis ML');st.caption('Analisis ML mendukung decision support dan melengkapi analisis epidemiologi, bukan menggantikannya.')
+        st.markdown('### 🤖 Analisis ML')
+        show_tab_resume('Resume Machine Learning',ml_narrative(result.get('ml')),'performa model, feature importance dan hasil ML di bawah')
+        st.caption('Analisis ML mendukung decision support dan melengkapi analisis epidemiologi, bukan menggantikannya.')
         if include_ml:render_value(result.get('ml'))
         else:st.info('ML layer belum diaktifkan. Centang **Aktifkan ML layer** pada Panel Kontrol untuk menjalankan prediction models.')
 

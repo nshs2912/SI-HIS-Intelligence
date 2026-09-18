@@ -574,8 +574,104 @@ def ai_prediction_narrative(result,disease,label):
     return "\n\n".join(sections)
 
 def spatial_narrative(spatial):
-    if not isinstance(spatial,pd.DataFrame) or spatial.empty:return 'Belum terdapat cukup koordinat untuk analisis kepadatan spasial.'
-    counts=spatial['Cluster'].value_counts() if 'Cluster' in spatial else pd.Series(dtype=int);clusters=counts.drop(index=-1,errors='ignore');noise=int(counts.get(-1,0));return f"**DBSCAN** menemukan **{len(clusters)} cluster** dan **{noise} titik noise/outlier**. Cluster bukan otomatis episentrum penularan; interpretasi harus dikaitkan dengan TIME, paparan, populasi berisiko dan investigasi lapangan."
+    """Resume DBSCAN yang menjelaskan metode, hasil, interpretasi, dan tindak lanjut."""
+    if not isinstance(spatial,pd.DataFrame) or spatial.empty:
+        return (
+            "### 🧭 Resume Spatial Epidemiology\n\n"
+            "Analisis DBSCAN belum dapat dijalankan karena koordinat geografis yang valid belum mencukupi."
+        )
+    if 'Cluster' not in spatial.columns:
+        return "### 🧭 Resume Spatial Epidemiology\n\nKolom hasil cluster DBSCAN belum tersedia."
+
+    d=spatial.copy()
+    counts=d['Cluster'].value_counts()
+    clusters=counts.drop(index=-1,errors='ignore').sort_index()
+    noise=int(counts.get(-1,0))
+    total=len(d)
+    clustered=int(clusters.sum())
+    clustered_pct=(clustered/total*100) if total else 0
+    noise_pct=(noise/total*100) if total else 0
+
+    # Profil tiap cluster bila atribut kasus tersedia.
+    profiles=[]
+    for cid,g in d[d['Cluster']!=-1].groupby('Cluster'):
+        n=len(g)
+        lat=pd.to_numeric(g.get('Latitude',pd.Series(dtype=float)),errors='coerce').mean()
+        lon=pd.to_numeric(g.get('Longitude',pd.Series(dtype=float)),errors='coerce').mean()
+        mean_age=pd.to_numeric(g.get('Umur',pd.Series(dtype=float)),errors='coerce').mean()
+        deaths=_death_series_app(g).sum() if 'Is_Meninggal' in g.columns or 'Status Penderita' in g.columns else 0
+        cfr=deaths/n*100 if n else 0
+        density=None
+        if 'Cluster_Radius_KM' in g.columns:
+            radius=pd.to_numeric(g['Cluster_Radius_KM'],errors='coerce').max()
+            if pd.notna(radius) and radius>0:
+                density=n/(3.14159*radius*radius)
+        place='-'
+        for col in ['Desa/Kelurahan','Kecamatan','Kabupaten','Provinsi']:
+            if col in g.columns and not g[col].dropna().empty:
+                place=str(g[col].mode().iloc[0])
+                break
+        profiles.append({'cluster':int(cid),'n':n,'lat':lat,'lon':lon,'age':mean_age,'deaths':int(deaths),'cfr':cfr,'density':density,'place':place})
+    profiles.sort(key=lambda x:x['n'],reverse=True)
+    top=profiles[0] if profiles else None
+    high_density=sum(1 for x in profiles if x['density'] is not None and x['density']>5)
+    outlier_label="tidak ada titik noise" if noise==0 else f"{noise:,} titik noise/outlier"
+
+    lines=[
+        "### 🧭 Resume Spatial Epidemiology",
+        "",
+        "### 🔬 Apa itu DBSCAN?",
+        "**DBSCAN (Density-Based Spatial Clustering of Applications with Noise)** adalah algoritma clustering berbasis kepadatan. "
+        "Dalam SI-HIS, DBSCAN mengelompokkan titik kasus yang secara geografis berdekatan dan memiliki kepadatan yang cukup menurut parameter "
+        "**eps** (jarak maksimum antar titik yang dianggap berdekatan) dan **min_samples** (jumlah minimum titik untuk membentuk kepadatan/cluster). "
+        "Titik yang tidak memenuhi kepadatan tersebut ditandai sebagai **noise/outlier (-1)**.",
+        "",
+        "**Cara membaca hasil:** cluster menunjukkan konsentrasi titik kasus dalam ruang berdasarkan parameter algoritma; "
+        "DBSCAN **tidak membuktikan sumber penularan, arah transmisi, maupun hubungan kausal**. Karena itu istilah *epicenter* pada dashboard harus dipahami "
+        "sebagai **pusat konsentrasi kasus/cluster prioritas**, bukan otomatis sumber wabah.",
+        "",
+        "### 📊 Hasil Utama DBSCAN",
+        f"- **Cluster terdeteksi:** **{len(profiles):,}**.",
+        f"- **Kasus/titik dalam cluster:** **{clustered:,} ({clustered_pct:.1f}%)**.",
+        f"- **Noise/outlier:** **{noise:,} ({noise_pct:.1f}%)** — {outlier_label}.",
+        f"- **Cluster kepadatan >5 kasus/km²:** **{high_density:,}**"
+    ]
+    if top:
+        lines += [
+            "",
+            "### 📍 Epicenter/Cluster Prioritas",
+            f"- **Cluster terbesar:** **#{top['cluster']}** di sekitar **{top['place']}**, dengan **{top['n']:,} kasus**.",
+            (f"- Rata-rata usia: **{top['age']:.1f} tahun**." if pd.notna(top['age']) else "- Rata-rata usia: data tidak tersedia."),
+            f"- Kematian: **{top['deaths']:,}**; CFR klaster: **{top['cfr']:.2f}%**.",
+            (f"- Perkiraan kepadatan: **{top['density']:.2f} kasus/km²**." if top['density'] is not None else "- Kepadatan kasus/km² belum dapat dihitung dari output DBSCAN yang tersedia.")
+        ]
+    lines += [
+        "",
+        "### 🧬 Analisis Pola Transmisi Berbasis Klaster",
+        "DBSCAN dapat membantu mengenali pola konsentrasi spasial yang perlu ditelusuri. Namun, label **Point Source, Propagated-like, atau Mixed** "
+        "tidak boleh ditetapkan hanya dari jumlah cluster. Penentuan pola transmisi harus menggabungkan **TIME + PLACE + riwayat paparan/perjalanan + "
+        "kontak epidemiologis + karakteristik penyakit**.",
+        "",
+        "### 🎯 Panduan Interpretasi",
+        "1. **Cluster/epicenter:** semakin banyak cluster yang terpisah, semakin banyak area konsentrasi yang perlu ditelusuri; bukan berarti otomatis penyebaran luas.",
+        "2. **Kasus berklaster vs outlier:** proporsi kasus berklaster menunjukkan berapa banyak titik berada dalam konsentrasi spasial yang terdeteksi. Outlier perlu diperiksa sebagai kemungkinan kasus yang terisolasi, lokasi dengan kepadatan rendah, atau introduksi—status impor tidak dapat disimpulkan tanpa riwayat perjalanan.",
+        "3. **Kepadatan:** angka kasus/km² hanya bermakna bila luas area cluster/radius dihitung dengan metode yang konsisten. Ambang >5 kasus/km² dapat dipakai sebagai ruleset operasional SI-HIS bila dikonfigurasi, bukan ambang epidemiologi universal.",
+        "4. **Radius cluster:** radius kecil dengan kepadatan tinggi menunjukkan konsentrasi geografis yang lebih sempit; radius besar menunjukkan sebaran geografis lebih luas. Keduanya tetap perlu dikaitkan dengan waktu dan pola paparan.",
+        "5. **Pola transmisi:** Point Source mengarah pada hipotesis paparan bersama; propagated-like dapat konsisten dengan transmisi berantai; Mixed berarti terdapat kombinasi pola yang perlu dibedakan melalui investigasi. Semua adalah hipotesis epidemiologis, bukan bukti tunggal dari DBSCAN.",
+        "",
+        "### 🚨 Rekomendasi Intervensi Berbasis Spasial",
+        "### Aksi Prioritas 24–72 Jam",
+        "1. Fokuskan peninjauan lapangan pada cluster dengan beban kasus/kematian tertinggi.",
+        "2. Lakukan active case finding dan investigasi lingkungan pada radius operasional yang ditetapkan petugas (misalnya **2 km**) bila sesuai karakteristik penyakit dan protokol setempat; angka 2 km bukan aturan universal.",
+        "3. Telusuri riwayat perjalanan, kontak, tempat tinggal, tempat kerja/sekolah, dan paparan bersama untuk membedakan cluster lokal dari kasus yang terpisah.",
+        "4. Jika terdapat kematian, prioritaskan verifikasi setiap lokasi kematian terhadap waktu kejadian dan cluster.",
+        "5. Ulangi DBSCAN secara berkala, misalnya **3–7 hari**, untuk melihat apakah cluster membesar, mengecil, berpindah, atau terbentuk cluster baru.",
+        "",
+        "### 🔴 Catatan Penting untuk Kemenkes/Dinkes",
+        "Hasil DBSCAN pada dashboard harus dapat ditelusuri kembali ke **datasheet kasus yang dianalisis**. Karena itu, cluster, outlier, lokasi dan metrik yang ditampilkan harus dapat diverifikasi dari baris data sumber. "
+        "DBSCAN merupakan alat *pattern detection* untuk membantu menentukan prioritas investigasi; konfirmasi epidemiologis tetap memerlukan validasi data dan investigasi lapangan."
+    ]
+    return "\n".join(lines)
 
 def curve_narrative(curve,disease):
     if not isinstance(curve,(tuple,list)) or len(curve)<4:return 'Klasifikasi kurva belum tersedia.'

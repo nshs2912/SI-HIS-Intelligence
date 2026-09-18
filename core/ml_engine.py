@@ -135,19 +135,39 @@ def _latest_village_features(df,spatial=False):
     if p.empty:return pd.DataFrame()
     latest=p.sort_values('Tanggal Sakit').groupby('Desa/Kelurahan',as_index=False).tail(1).copy()
     if spatial:
-        coords=latest[['Lat','Lon']].to_numpy(float); dens=[]
-        for i,(lat,lon) in enumerate(coords):
-            if not np.isfinite(lat) or not np.isfinite(lon):dens.append(0);continue
-            dist=111.2*np.sqrt(((coords[:,0]-lat)*np.cos(np.radians(lat)))**2+(coords[:,1]-lon)**2); dens.append(float(np.sum((dist<=20)&np.isfinite(dist))-1))
-        latest['Density']=dens
+        latest=_attach_area_density(latest, radius_km=20.0)
     return latest
+
+
+def _attach_area_density(panel, radius_km=20.0):
+    p=panel.copy()
+    if p.empty or not {'Desa/Kelurahan','Lat','Lon'}.issubset(p.columns):
+        return p
+    areas=p[['Desa/Kelurahan','Lat','Lon']].drop_duplicates('Desa/Kelurahan').copy()
+    coords=areas[['Lat','Lon']].to_numpy(float)
+    density=[]
+    for lat, lon in coords:
+        if not np.isfinite(lat) or not np.isfinite(lon):
+            density.append(0.0)
+            continue
+        dlat=(coords[:,0]-lat)*111.2
+        dlon=(coords[:,1]-lon)*111.2*np.cos(np.radians(lat))
+        dist=np.sqrt(dlat**2+dlon**2)
+        density.append(float(np.sum((dist <= radius_km) & np.isfinite(dist))-1))
+    areas['Density']=density
+    return p.drop(columns=['Density'], errors='ignore').merge(
+        areas[['Desa/Kelurahan','Density']], on='Desa/Kelurahan', how='left'
+    )
 
 
 def train_spatial_outbreak(df):
     p=_future_target(_daily_panel(df),None)
     if p.empty:return {'status':'error','message':'Riwayat harian-spasial belum cukup untuk training.'}
-    p['Density']=0.0
-    r=_train_classifier(p,'Outbreak_Target',['Daily_Cases','Rolling7','Lag1','Lag7','Growth7','Lat','Lon','Density'],'spatial outbreak 7-day'); r['derived_threshold']=p.attrs.get('derived_threshold',5); return r
+    p=_attach_area_density(p)
+    r=_train_classifier(p,'Outbreak_Target',['Daily_Cases','Rolling7','Lag1','Lag7','Growth7','Lat','Lon','Density'],'spatial outbreak 7-day')
+    r['derived_threshold']=p.attrs.get('derived_threshold',5)
+    r['density_radius_km']=20.0
+    return r
 
 def predict_klb(df,model):return _predict_generic(_latest_village_features(df),model,'KLB_Risk',['Daily_Cases','Rolling7','Lag1','Lag7','Growth7'])
 def predict_spatial_outbreak(df,model):return _predict_generic(_latest_village_features(df,True),model,'Spatial_Risk',['Daily_Cases','Rolling7','Lag1','Lag7','Growth7','Lat','Lon','Density'])

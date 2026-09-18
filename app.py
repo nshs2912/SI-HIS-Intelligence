@@ -689,8 +689,20 @@ def vulnerable_narrative(v):
     d=pd.DataFrame(v);top=d.iloc[0];return f"Metode menggunakan stratifikasi **Kelompok Umur × Pekerjaan × Status Komorbid**, lalu menghitung kasus, kematian, tingkat kematian akibat penyakit (CFR) dan Risk Multiplier terhadap baseline. Profil teratas: **{top.get('Age_Group','-')} × {top.get('Pekerjaan','-')} × {top.get('Status Komorbid','-')}**, n={int(top.get('Total',0))}, CFR={float(top.get('CFR (%)',0)):.2f}%. Strata kecil harus ditafsirkan hati-hati."
 
 def ml_narrative(ml):
-    if not isinstance(ml,dict) or not ml:return 'ML belum dijalankan.'
-    return 'ML digunakan sebagai decision-support, bukan kepastian klinis/epidemiologis. Model produksi harus dievaluasi dengan validasi internal-eksternal, diskriminasi, kalibrasi, class imbalance, explainability, bias, data drift dan human review.'
+    if not isinstance(ml,dict) or not ml:return 'ML layer belum dijalankan.'
+    sections=[
+        ('1. Case Severity Prediction','Memprediksi probabilitas suatu kasus menjadi berat berdasarkan umur, jenis kelamin, pekerjaan, imunisasi, komorbid, perjalanan dan faktor risiko lain. Digunakan untuk membantu triase, prioritas pemantauan dan kesiapan pelayanan.'),
+        ('2. KLB / Outbreak 7-Day Prediction','Memprediksi apakah suatu desa berpotensi mencapai ambang beban kasus 7 hari berikutnya berdasarkan sinyal temporal seperti kasus harian, rolling 7 hari, lag dan pertumbuhan. Ini adalah early-warning model, bukan penetapan legal KLB.'),
+        ('3. Spatial Outbreak Prediction','Menggabungkan sinyal temporal dan informasi lokasi untuk memperkirakan area yang berpotensi mengalami outbreak berikutnya. Fungsinya membantu menentukan wilayah yang perlu dipantau atau diverifikasi lebih dahulu.'),
+        ('4. Vulnerable Population Prediction','Memprediksi probabilitas kelompok/kasus memiliki karakteristik outcome rentan menggunakan variabel person dan faktor paparan. Hasilnya membantu menentukan prioritas surveillance dan perlindungan kelompok rentan, bukan diagnosis individual.'),
+        ('5. Temporal Forecasting','Memproyeksikan jumlah kasus beberapa hari ke depan. SI-HIS menggunakan ensemble forecasting dan backtest temporal untuk membantu memperkirakan beban layanan, kebutuhan kesiapsiagaan dan perubahan tren.')
+    ]
+    out=['**SI-HIS menggunakan 5 lapisan ML/AI untuk fungsi yang berbeda.** ML tidak menggantikan analisis epidemiologi TIME + PERSON + PLACE; ML digunakan untuk prediction/forecasting setelah sinyal epidemiologi dibaca.']
+    for title,desc in sections:
+        out.append(f'### {title}\n{desc}')
+    out.append('**Cara membaca metrik model:** ROC-AUC menilai diskriminasi; PR-AUC penting ketika outcome positif jarang; recall menunjukkan proporsi target positif yang tertangkap; specificity menunjukkan proporsi non-target yang tersaring; precision menunjukkan proporsi prediksi positif yang benar; F1 menyeimbangkan precision dan recall; Brier menilai kualitas probabilitas dan umumnya semakin kecil semakin baik. Feature importance menunjukkan kontribusi prediktif, bukan hubungan sebab-akibat.')
+    out.append('**Prinsip interpretasi:** model dengan accuracy tinggi belum tentu berguna bila outcome positif jarang. Perhatikan terutama recall, precision, PR-AUC, kalibrasi/Brier dan distribusi kelas. Setiap model harus divalidasi pada data eksternal sebelum digunakan untuk keputusan operasional.')
+    return '\n\n'.join(out)
 
 st.sidebar.header('⚙️ Panel Kontrol & Filter');source=st.sidebar.radio('Sumber Data',['Gunakan Data Simulasi (AI-Ready)','Upload File Excel/CSV Custom'])
 if source.startswith('Gunakan'):df_raw=generate_data_simulasi().copy();st.sidebar.success(f'✅ {len(df_raw):,} data dimuat.')

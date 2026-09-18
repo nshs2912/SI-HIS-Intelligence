@@ -357,3 +357,86 @@ def build_continuous_epidemiology_signals(
         "signal_count": len(alerts),
         "note": "Signal detection is not a legal KLB determination and requires validation.",
     }
+
+
+# --- Additional epidemiological ML helpers ---
+
+def _safe_binary(series):
+    if series is None:
+        return pd.Series(dtype=int)
+    if pd.api.types.is_numeric_dtype(series):
+        return pd.to_numeric(series, errors="coerce")
+    return series.astype(str).str.strip().str.lower().isin({"1","true","ya","yes","y","positif","positif/konfirm","konfirm"}).astype(int)
+
+
+def build_case_level_derived_features(df: pd.DataFrame) -> pd.DataFrame:
+    """Build reusable epidemiological case features without inventing outcomes."""
+    if df is None or df.empty:
+        return pd.DataFrame()
+    d = df.copy()
+    if "Umur" in d.columns:
+        d["Umur"] = pd.to_numeric(d["Umur"], errors="coerce")
+        d["Age_Risk_65Plus"] = (d["Umur"] >= 65).astype(int)
+    for source, target in [("Status Komorbid", "Comorbidity_Flag"), ("Riwayat Perjalanan", "Travel_Flag"), ("Status Imunisasi", "Immunization_Incomplete")]:
+        if source in d.columns:
+            s = d[source].astype(str).str.lower()
+            if source == "Status Komorbid": d[target] = s.isin({"ada komorbid", "ada", "ya", "positif"}).astype(int)
+            elif source == "Riwayat Perjalanan": d[target] = s.isin({"ya", "yes", "1", "true"}).astype(int)
+            else: d[target] = s.isin({"tidak lengkap", "incomplete"}).astype(int)
+    if "Is_Meninggal" in d.columns:
+        d["Death_Flag"] = _safe_binary(d["Is_Meninggal"]).fillna(0).astype(int)
+    return d
+
+
+def rank_areas_by_continuous_signal(
+    df: pd.DataFrame,
+    area_col: str = AREA_COL,
+    radius_km: float = 10.0,
+    anomaly_weight: float = 0.30,
+    change_weight: float = 0.25,
+    growth_weight: float = 0.25,
+    spatial_weight: float = 0.20,
+) -> pd.DataFrame:
+    """Combine independent signal components into a transparent 0-100 screening score.
+
+    The score is a prioritisation aid, not a probability and not a legal KLB score.
+    """
+    anomalies = detect_temporal_anomalies(df, area_col)
+    changes = detect_change_points(df, area_col)
+    spatial = build_spatial_neighbor_features(df, radius_km=radius_km, area_col=area_col)
+    daily = build_temporal_features(_to_daily(df, area_col), area_col)
+    parts = []
+    if not anomalies.empty:
+        a = anomalies.groupby(area_col, as_index=False).agg(Anomaly_Score=("Anomaly_Score", "max"), Anomaly_Flag=("Anomaly_Flag", "sum"))
+        a["Anomaly_Component"] = a["Anomaly_Score"].rank(pct=True) * 100
+        parts.append(a[[area_col, "Anomaly_Component"]])
+    if not changes.empty:
+        c = changes.groupby(area_col, as_index=False).agg(Change_Z=("Change_Z", "max"), Change_Flag=("Change_Point_Flag", "sum"))
+        c["Change_Component"] = pd.to_numeric(c["Change_Z"], errors="coerce").clip(lower=0).rank(pct=True) * 100
+        parts.append(c[[area_col, "Change_Component"]])
+    if not daily.empty:
+        g = daily.sort_values(DATE_COL).groupby(area_col, as_index=False).tail(1).copy()
+        g["Growth_Component"] = pd.to_numeric(g["Growth7"], errors="coerce").clip(lower=0).rank(pct=True) * 100
+        parts.append(g[[area_col, "Growth_Component"]])
+    if not spatial.empty:
+        s = spatial[[area_col, "Neighbor_Cases"]].copy()
+        s["Spatial_Component"] = pd.to_numeric(s["Neighbor_Cases"], errors="coerce").fillna(0).rank(pct=True) * 100
+        parts.append(s[[area_col, "Spatial_Component"]])
+    if not parts:
+        return pd.DataFrame()
+    out = parts[0]
+    for p in parts[1:]: out = out.merge(p, on=area_col, how="outer")
+    for col in ["Anomaly_Component", "Change_Component", "Growth_Component", "Spatial_Component"]:
+        if col not in out: out[col] = 0.0
+        out[col] = out[col].fillna(0.0)
+    total_w = anomaly_weight + change_weight + growth_weight + spatial_weight
+    if total_w <= 0: total_w = 1.0
+    out["Continuous_Signal_Score"] = (
+        out["Anomaly_Component"] * anomaly_weight +
+        out["Change_Component"] * change_weight +
+        out["Growth_Component"] * growth_weight +
+        out["Spatial_Component"] * spatial_weight
+    ) / total_w
+    out["Signal_Level"] = pd.cut(out["Continuous_Signal_Score"], [-0.01, 33.33, 66.67, 100.01], labels=["LOW","MEDIUM","HIGH"]).astype(str)
+    out["Interpretation"] = "Prioritas screening berbasis gabungan signal; bukan probability, diagnosis, atau status KLB."
+    return out.sort_values("Continuous_Signal_Score", ascending=False).reset_index(drop=True)

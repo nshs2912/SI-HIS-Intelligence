@@ -690,9 +690,9 @@ def vulnerable_narrative(v):
 
 def ml_narrative(ml):
     if not isinstance(ml,dict) or not ml:return 'ML layer belum dijalankan.'
-    return ('**SI-HIS menggunakan 5 lapisan ML/AI dengan fungsi yang berbeda:** '
-            'prediksi severity, prediksi outbreak 7 hari, prediksi spasial, prediksi populasi rentan, '
-            'dan forecasting temporal. Setiap model harus dibaca melalui target, data, metrik, '
+    return ('**SI-HIS menggunakan 12 komponen ML/AI epidemiologi dengan fungsi yang berbeda:** '
+            'prediksi severity, prediksi outbreak 7 hari, prediksi spasial, prediksi populasi rentan, forecasting temporal, anomaly detection, change-point detection, growth-risk, '
+            'spatio-temporal risk, TIME + PERSON + PLACE risk, disease-specific growth, vulnerability clustering, dan validation/drift monitoring. Setiap model harus dibaca melalui target, data, metrik, '
             'feature importance, keterbatasan, dan status validasinya. Objek Pipeline tidak ditampilkan sebagai hasil analisis.')
 
 def _metric_value(v, digits=3):
@@ -763,35 +763,159 @@ def _render_ml_forecast(result):
     with st.expander('📖 Cara membaca forecasting',expanded=False):
         st.markdown('Forecast adalah estimasi model, bukan jumlah kasus yang pasti terjadi. MAE/RMSE menggambarkan kesalahan pada backtest; semakin kecil umumnya semakin baik. Puncak forecast adalah nilai tertinggi yang diproyeksikan dalam horizon. Gunakan bersama kurva epidemik, EWS, Rₜ, dan konteks intervensi.')
 
+def _render_ml_epi_table(title, result, columns=None, max_rows=20):
+    st.markdown(f'### {title}')
+    if isinstance(result, pd.DataFrame):
+        table=result
+    elif isinstance(result, dict) and isinstance(result.get('table'), pd.DataFrame):
+        table=result['table']
+    elif isinstance(result, dict) and isinstance(result.get('calibration_table'), pd.DataFrame):
+        table=result['calibration_table']
+    else:
+        table=None
+    if table is not None and not table.empty:
+        if columns:
+            cols=[c for c in columns if c in table.columns]
+            if cols: table=table[cols]
+        st.dataframe(table.head(max_rows),use_container_width=True,hide_index=True)
+    elif isinstance(result, dict) and result.get('status') == 'error':
+        st.warning(result.get('message','Hasil belum tersedia.'))
+    else:
+        st.info('Belum ada hasil yang dapat ditampilkan pada data/scope ini.')
+
+
+def _render_ml_epi_status(title, result, keys):
+    st.markdown(f'### {title}')
+    if not isinstance(result,dict):
+        st.info('Belum tersedia.')
+        return
+    if result.get('status') == 'error':
+        st.warning(result.get('message','Data belum mencukupi.'))
+        return
+    vals=[]
+    for key,label in keys:
+        value=result.get(key)
+        if isinstance(value,(int,float,np.integer,np.floating)) and np.isfinite(float(value)):
+            vals.append((label,_metric_value(value,3)))
+        elif value is not None and not isinstance(value,(dict,list,pd.DataFrame)):
+            vals.append((label,str(value)))
+    if vals:
+        cols=st.columns(min(4,len(vals)))
+        for i,(label,value) in enumerate(vals): cols[i].metric(label,value)
+    if result.get('interpretation'): st.info(result['interpretation'])
+
+
+def _render_ml_disease_models(result):
+    st.markdown('### 10. Disease-Specific Growth Models')
+    if not isinstance(result,dict) or not result:
+        st.info('Model spesifik penyakit belum tersedia.')
+        return
+    rows=[]
+    for disease,item in result.items():
+        if not isinstance(item,dict):
+            continue
+        metrics=item.get('metrics',{})
+        rows.append({
+            'Penyakit':disease,
+            'Status':item.get('status','-'),
+            'ROC-AUC':metrics.get('roc_auc'),
+            'PR-AUC':metrics.get('pr_auc'),
+            'Threshold next-7-day':item.get('threshold_next7_total',item.get('derived_threshold')),
+            'Training':item.get('train_rows'),
+            'Holdout':item.get('test_rows'),
+        })
+    if rows: st.dataframe(pd.DataFrame(rows),use_container_width=True,hide_index=True)
+    else: st.info('Belum ada model disease-specific yang dapat dilatih.')
+
+
 def render_ml_report(ml):
     st.markdown('### 🧠 AI/ML Intelligence Report')
-    st.caption('Lima lapisan ML/AI SI-HIS. Setiap lapisan memiliki target dan fungsi berbeda. Model teknis tidak ditampilkan sebagai pengganti hasil analisis.')
+    st.caption('Dua belas komponen ML/AI SI-HIS. Lima model utama lama tetap ditampilkan, dan komponen epidemiological intelligence tambahan sekarang ditampilkan sebagai bagian terpisah agar tidak tersembunyi di backend.')
     if not isinstance(ml,dict) or not ml:
         st.info('ML layer belum dijalankan.')
         return
+
     _render_ml_model_card(
         '1. Case Severity Prediction',
-        'Memprediksi probabilitas kasus masuk outcome severity yang didefinisikan sistem. Pada implementasi saat ini, target demo severity diturunkan dari kematian atau status rawat inap.',
-        'Kasus mana yang perlu mendapat prioritas pemantauan/triase berdasarkan probabilitas outcome model?',
+        'Memprediksi probabilitas outcome severity yang didefinisikan sistem. Implementasi saat ini memakai target turunan kematian atau status rawat inap.',
+        'Kasus mana yang perlu dipantau berdasarkan probabilitas outcome model?',
         ml.get('case_severity'))
     _render_ml_model_card(
         '2. KLB / Outbreak 7-Day Prediction',
-        'Memprediksi apakah beban kasus 7 hari berikutnya pada desa mencapai threshold turunan dari distribusi historis. Threshold ini adalah threshold model, bukan definisi legal KLB.',
-        'Desa mana yang perlu dipantau lebih dini karena sinyal temporalnya mengarah ke peningkatan beban 7 hari?',
+        'Memprediksi beban kasus 7 hari berikutnya terhadap threshold turunan historis. Threshold ini bukan definisi legal KLB.',
+        'Area mana yang menunjukkan sinyal peningkatan beban 7 hari?',
         ml.get('klb'))
     _render_ml_model_card(
         '3. Spatial Outbreak Prediction',
-        'Menggabungkan sinyal temporal dan lokasi untuk memperkirakan area yang berpotensi mengalami peningkatan outbreak pada horizon berikutnya.',
-        'Wilayah mana yang perlu diprioritaskan untuk verifikasi spasial dan investigasi?',
+        'Menggunakan sinyal temporal + lokasi untuk mendukung prioritas verifikasi spasial.',
+        'Area mana yang perlu diverifikasi secara spasial?',
         ml.get('spatial'))
     _render_ml_model_card(
         '4. Vulnerable Population Prediction',
-        'Memprediksi outcome rentan berdasarkan karakteristik person dan paparan. Hasilnya dipakai untuk surveillance/population prioritization, bukan diagnosis individual.',
-        'Kelompok atau karakteristik kasus mana yang perlu mendapat perhatian surveillance lebih lanjut?',
+        'Memprediksi outcome rentan dari karakteristik person/paparan. Bukan diagnosis individual.',
+        'Karakteristik kelompok mana yang perlu mendapat perhatian surveillance?',
         ml.get('vulnerable'))
     _render_ml_forecast(ml.get('forecast'))
+
+    epi=ml.get('epidemiological_intelligence',{})
+    if not isinstance(epi,dict):
+        epi={}
+    st.markdown('---')
+    st.markdown('## 🔬 Epidemiological ML Intelligence — Extended Layer')
+    st.caption('Komponen tambahan berikut sebelumnya sudah dihitung oleh backend tetapi belum dirender pada menu ML. Sekarang seluruh komponen utama ditampilkan. Semua output adalah signal/decision-support, bukan diagnosis, probabilitas terkalibrasi, atau penetapan legal KLB.')
+
+    signals=epi.get('continuous_signals',epi.get('signals',epi.get('continuous_signal')))
+    _render_ml_epi_table(
+        '6. Temporal Anomaly Detection — Isolation Forest',
+        signals,
+        ['Tanggal Sakit','Desa/Kelurahan','Cases','Anomaly_Score','Anomaly_Flag'],
+        30)
+    _render_ml_epi_table(
+        '7. Change-Point Detection — Rolling Baseline',
+        epi.get('change_points'),
+        ['Tanggal Sakit','Desa/Kelurahan','Cases','Change_Z','Change_Point_Flag'],
+        30)
+
+    _render_ml_epi_status(
+        '8. Area Growth-Risk — Next 7 Days',
+        epi.get('growth_risk'),
+        [('threshold_next7_total','Threshold next 7 hari'),('horizon_days','Horizon (hari)')])
+    growth=epi.get('growth_risk')
+    if isinstance(growth,dict) and isinstance(growth.get('feature_importance'),pd.DataFrame):
+        _render_ml_epi_table('Feature Importance — Growth Risk',growth.get('feature_importance'),None,15)
+
+    _render_ml_epi_status(
+        '9. Spatio-Temporal Risk',
+        epi.get('spatiotemporal_risk'),
+        [('threshold_next7_total','Threshold next 7 hari'),('horizon_days','Horizon (hari)')])
+    st.caption('Dimensi: TIME + PLACE. Spatial neighbour features menggunakan area/koordinat valid; hasil dipakai sebagai prioritas verifikasi, bukan bukti sumber penularan.')
+
+    _render_ml_epi_table(
+        '10. TIME + PERSON + PLACE Risk — Area-Day',
+        epi.get('time_person_place_risk'),
+        None, 30)
+    st.caption('Menggabungkan beban temporal dengan agregat karakteristik PERSON seperti umur, proporsi usia ≥65, komorbid, perjalanan, dan kematian pada area-hari. Pastikan definisi waktu prediksi mencegah leakage pada produksi.')
+
+    _render_ml_disease_models(epi.get('disease_specific_growth'))
+
+    vuln=epi.get('vulnerability_clustering')
+    st.markdown('### 12. Population Vulnerability Clustering')
+    if isinstance(vuln,dict) and vuln.get('status')=='ok':
+        st.caption(f"KMeans clustering menghasilkan {vuln.get('n_clusters','N/A')} cluster berdasarkan fitur populasi yang tersedia. Ini segmentasi surveillance, bukan label klinis.")
+        _render_ml_epi_table('Profil Cluster',vuln.get('profiles'),None,20)
+    else:
+        st.warning(vuln.get('message','Clustering belum tersedia.') if isinstance(vuln,dict) else 'Clustering belum tersedia.')
+
+    drift=epi.get('dataset_drift')
+    st.markdown('### 13. Validation & Dataset Drift')
+    if isinstance(drift,dict) and drift.get('status')=='ok':
+        st.caption(f"Reference: {drift.get('reference_start')} → {drift.get('reference_end')} | Current: {drift.get('current_start')} → {drift.get('current_end')} | Feature drift review: {drift.get('drift_review_count',0)}")
+        _render_ml_epi_table('PSI / Drift Screening',drift.get('table'),None,20)
+    else:
+        st.info(drift.get('message','Drift belum tersedia.') if isinstance(drift,dict) else 'Drift belum tersedia.')
+
     st.markdown('### 📌 Cara Membaca Hasil ML secara Keseluruhan')
-    st.markdown('1. **Mulai dari target:** pahami apa yang sebenarnya diprediksi.\n2. **Lihat holdout temporal:** jangan hanya melihat training performance.\n3. **Perhatikan PR-AUC, recall, precision, specificity dan Brier**, terutama bila outcome positif jarang.\n4. **Baca feature importance sebagai sinyal prediktif**, bukan faktor penyebab.\n5. **Hubungkan prediction dengan TIME + PERSON + PLACE dan outcome epidemiologis** sebelum membuat keputusan.\n6. **Validasi eksternal diperlukan** sebelum model digunakan sebagai dasar keputusan operasional.')
+    st.markdown('1. **Mulai dari target:** pahami apa yang sebenarnya diprediksi.\n2. **Lihat holdout temporal:** jangan hanya melihat training performance.\n3. **Perhatikan PR-AUC, recall, precision, specificity dan Brier**, terutama bila outcome positif jarang.\n4. **Baca feature importance sebagai sinyal prediktif**, bukan faktor penyebab.\n5. **Gunakan TIME + PERSON + PLACE** untuk menghubungkan waktu, karakteristik populasi, dan lokasi.\n6. **Baca anomaly, change-point, growth-risk, spatial risk, clustering, dan drift sebagai sinyal yang saling melengkapi.**\n7. **Validasi eksternal dan monitoring drift diperlukan** sebelum model digunakan sebagai dasar keputusan operasional.')
 
 st.sidebar.header('⚙️ Panel Kontrol & Filter');source=st.sidebar.radio('Sumber Data',['Gunakan Data Simulasi (AI-Ready)','Upload File Excel/CSV Custom'])
 if source.startswith('Gunakan'):df_raw=generate_data_simulasi().copy();st.sidebar.success(f'✅ {len(df_raw):,} data dimuat.')

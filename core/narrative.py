@@ -442,6 +442,10 @@ def ml_expert(ml, disease=None, label=None):
     lines += ["", "### 🧠 Peran ML pada SI-HIS"]
     for title, purpose in engines:
         lines.append(f"**{title}:** {purpose}. Hasil digunakan untuk membantu menentukan **apa yang perlu diverifikasi**, bukan tindakan otomatis.")
+    calibration = ml.get("calibration", {}) if isinstance(ml, dict) else {}
+    if isinstance(calibration, dict) and calibration.get("status") == "ok":
+        lines += ["", "### 📐 Kalibrasi Probabilitas",
+                  f"Holdout calibration: **ECE {_num(calibration.get(\"ece\")):.3f}** dan **log-loss {_num(calibration.get(\"log_loss\")):.3f}**. ECE membantu menilai kedekatan probabilitas prediksi dengan frekuensi outcome pada holdout; hasil ini belum membuktikan kalibrasi pada populasi eksternal."]
     lines += [
         "", "### 🔬 Interpretasi model",
         "Feature importance menunjukkan kontribusi prediktif variabel dalam model, bukan sebab-akibat. Forecast adalah estimasi berbasis pola historis. Sinyal spasial menunjukkan konsentrasi menurut model, bukan otomatis sumber penularan.",

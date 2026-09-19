@@ -1064,7 +1064,7 @@ else:
     if not result.get('eligible',False):st.warning('Analisis epidemiologi belum dapat dijalankan.');render_value(result.get('eligibility'));st.stop()
     total=int(result['overview']['total_cases']);mortality=result.get('mortality');deaths=int(mortality.get('deaths',mortality.get('meninggal',0)) or 0) if isinstance(mortality,dict) else 0;cfr=deaths/total*100 if total else 0;a,b,c=st.columns(3);a.metric(f'Total {sel_disease}',f'{total:,}');b.metric('Meninggal',f'{deaths:,}');c.metric('CFR — tingkat kematian akibat penyakit',f'{cfr:.2f}%')
     # Navigation Bar utama tetap horizontal di atas. Setiap tab memiliki resume sendiri tepat di bawah tab.
-    tab_labels=['🚨 AI Prediction & Recommendation','📊 Trias Epidemiologi (Detail)','📈 Kurva Epidemik & Prediksi','🗺️ Peta Spasial & AI DBSCAN','🧪 Analisis Faktor Risiko','🤖 Analisis ML']
+    disease_family=str(disease_profile_pre.family).upper();time_tab='📈 Kurva Epidemik & Prediksi' if disease_family=='MENULAR' else '📈 Tren & Forecast';spatial_tab='🗺️ Peta Spasial & AI DBSCAN' if disease_family=='MENULAR' else '🗺️ Peta Spasial & Clustering';tab_labels=['🚨 AI Prediction & Recommendation','📊 Trias Epidemiologi (Detail)',time_tab,spatial_tab,'🧪 Analisis Faktor Risiko','🤖 Analisis ML']
     tabs=st.tabs(tab_labels)
     with tabs[0]:
         st.markdown('### 🚨 AI Prediction & Recommendation')

@@ -45,6 +45,20 @@ STABILITY_GUIDE = [
     },
 ]
 
+def _safe_binary(series):
+    """Normalize common binary/boolean values to 0/1 without assuming missing means positive."""
+    s=series.copy()
+    if pd.api.types.is_bool_dtype(s):
+        return s.astype("Int64")
+    numeric=pd.to_numeric(s,errors="coerce")
+    text=s.astype(str).str.strip().str.lower()
+    mapped=text.map({
+        "ya":1,"yes":1,"true":1,"1":1,"positif":1,"meninggal":1,"ada":1,
+        "tidak":0,"no":0,"false":0,"0":0,"negatif":0,"hidup":0,"tidak ada":0,
+    })
+    out=numeric.where(numeric.isin([0,1]),mapped)
+    return out.astype("Int64")
+
 def _stability_label(n, events=None):
     n = int(n or 0)
     if n <= STABILITY_THRESHOLDS["low_max_n"]:

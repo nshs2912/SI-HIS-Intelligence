@@ -711,17 +711,19 @@ def _metric_value(v, digits=3):
     except Exception:
         return 'N/A'
 
-def _render_ml_model_card(title, purpose, decision_question, result):
+def _render_ml_model_card(title, purpose, decision_question, result, disease="penyakit terpilih"):
     st.markdown(f'### {title}')
-    st.markdown(f'**Fungsi:** {purpose}')
-    st.markdown(f'**Pertanyaan keputusan:** {decision_question}')
+    st.markdown(f'**Apa yang dilakukan model?** {purpose}')
+    st.markdown(f'**Pertanyaan yang dibantu dijawab:** {decision_question}')
     if not isinstance(result,dict):
-        st.info('Hasil model belum tersedia.')
+        st.info(f'Hasil model untuk **{disease}** belum tersedia.')
         return
-    if result.get('status') != 'ok':
-        st.warning(f"Model belum menghasilkan metrik yang valid: {result.get('message','Data belum mencukupi.')}")
+    status=str(result.get('status','-')).lower()
+    if status!='ok':
+        st.warning(f"**Status model: {result.get('status','-')}** — {result.get('message','Data atau label belum mencukupi untuk evaluasi yang valid.')}")
+        st.caption('Status ERROR/insufficient data bukan berarti performa model buruk atau nol. Artinya hasil evaluasi belum layak ditafsirkan.')
         return
-    metrics=result.get('metrics',{})
+    metrics=result.get('metrics',{}) if isinstance(result.get('metrics',{}),dict) else {}
     m1,m2,m3,m4=st.columns(4)
     m1.metric('ROC-AUC',_metric_value(metrics.get('roc_auc')))
     m2.metric('PR-AUC',_metric_value(metrics.get('pr_auc')))
@@ -732,21 +734,36 @@ def _render_ml_model_card(title, purpose, decision_question, result):
     m6.metric('F1',_metric_value(metrics.get('f1')))
     m7.metric('Brier',_metric_value(metrics.get('brier')))
     m8.metric('Accuracy',_metric_value(metrics.get('accuracy')))
-    st.markdown(f"**Cara membaca:** recall={_metric_value(metrics.get('recall'))} menunjukkan proporsi outcome positif yang tertangkap; specificity={_metric_value(metrics.get('specificity'))} menunjukkan proporsi non-target yang tersaring; PR-AUC={_metric_value(metrics.get('pr_auc'))} penting ketika outcome positif relatif jarang. Brier={_metric_value(metrics.get('brier'))} menilai kualitas probabilitas, umumnya semakin kecil semakin baik.")
+    recall=metrics.get('recall');spec=metrics.get('specificity');pr=metrics.get('pr_auc');brier=metrics.get('brier')
+    st.markdown('#### 📖 Arti metrik — bahasa sederhana')
+    st.markdown(
+        f"**Recall = {_metric_value(recall)}:** dari semua kasus yang **benar-benar memiliki outcome target**, berapa proporsi yang berhasil ditemukan model. "
+        f"Jadi recall {_metric_value(recall)} berarti sekitar **{float(recall)*100:.1f}% kasus target tertangkap**, sedangkan sisanya dapat terlewat. "
+        f"**Specificity = {_metric_value(spec)}:** dari semua kasus yang **sebenarnya bukan target**, berapa proporsi yang berhasil dikenali sebagai bukan target. "
+        f"Specificity {_metric_value(spec)} berarti sekitar **{float(spec)*100:.1f}% non-target tersaring dengan benar**. "
+        f"**PR-AUC = {_metric_value(pr)}:** merangkum kualitas deteksi target dengan mempertimbangkan precision dan recall; sangat relevan ketika target relatif jarang. "
+        f"**Brier = {_metric_value(brier)}:** menilai seberapa dekat probabilitas prediksi dengan outcome aktual; pada skala ini **semakin kecil umumnya semakin baik**."
+    ) if all(v is not None and pd.notna(v) for v in [recall,spec,pr,brier]) else st.caption('Sebagian metrik tidak tersedia; interpretasi hanya diberikan untuk nilai yang valid.')
+    st.markdown('#### 🔬 Interpretasi praktis')
+    if recall is not None and spec is not None and pd.notna(recall) and pd.notna(spec):
+        if float(recall)<float(spec):
+            st.info(f'Untuk **{disease}**, model saat ini lebih baik dalam mengenali non-target daripada menangkap seluruh target. Dalam surveillance, perhatikan risiko false negative karena kasus target yang terlewat.')
+        else:
+            st.info(f'Untuk **{disease}**, recall tidak lebih rendah daripada specificity pada data uji. Tetap periksa precision, PR-AUC, calibration, dan validasi temporal sebelum penggunaan operasional.')
     if result.get('train_rows') is not None or result.get('test_rows') is not None:
-        st.caption(f"Validasi: holdout temporal | training={result.get('train_rows','N/A'):,} | holdout={result.get('test_rows','N/A'):,} | positive rate={float(result.get('positive_rate',0))*100:.1f}%")
+        tr=result.get('train_rows');te=result.get('test_rows');
+        st.caption(f"Validasi: **temporal holdout** | training={tr if tr is not None else 'N/A'} | holdout={te if te is not None else 'N/A'} | positive rate={float(result.get('positive_rate',0))*100:.1f}%")
     fi=result.get('feature_importance')
     if isinstance(fi,pd.DataFrame) and not fi.empty:
-        st.markdown('**Feature importance — kontribusi prediktif, bukan kausalitas**')
+        st.markdown('**Feature importance — variabel yang paling membantu prediksi model; bukan bukti sebab-akibat**')
         st.dataframe(fi.head(10),use_container_width=True,hide_index=True)
-    with st.expander('🔧 Detail teknis model',expanded=False):
+    with st.expander('🔧 Detail teknis & batas interpretasi',expanded=False):
         model=result.get('model')
-        if model is not None:
-            st.write(f'Model terlatih: {type(model).__name__}')
-            st.caption('Konfigurasi pipeline disimpan di backend dan tidak diperlakukan sebagai hasil epidemiologi.')
+        if model is not None: st.write(f'Model terlatih: {type(model).__name__}')
         st.write(f"Jumlah fitur: {len(result.get('features',[]))}")
         st.write(f"Fitur: {', '.join(map(str,result.get('features',[])))}")
         if result.get('holdout_start') is not None: st.write(f"Awal data holdout temporal: {result.get('holdout_start')}")
+        st.caption('Metrik adalah hasil evaluasi pada data uji, bukan jaminan performa di populasi lain. Distribusi kelas, ukuran sampel, missingness, perubahan pola penyakit, dan external validation perlu diperiksa.')
     if result.get('metrics',{}).get('Narrative'):
         st.info(result['metrics']['Narrative'])
 

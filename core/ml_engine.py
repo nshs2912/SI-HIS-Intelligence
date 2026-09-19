@@ -24,21 +24,42 @@ RANDOM_STATE = 42
 # universal epidemiological rules. Small counts can produce unstable rates.
 STABILITY_THRESHOLDS = {"low_max_n": 15, "medium_max_n": 29}
 
+# Operational screening thresholds for observation-count stability.
+# These are not universal epidemiological/statistical cut-offs and do not
+# establish representativeness, statistical validity, or population risk.
+STABILITY_GUIDE = [
+    {
+        "range": "n ≤ 15",
+        "label": "RENDAH",
+        "meaning": "Sampel sangat kecil; estimasi mudah berubah; tidak layak untuk generalisasi",
+    },
+    {
+        "range": "16–29",
+        "label": "SEDANG",
+        "meaning": "Sampel masih terbatas; interpretasi perlu kehati-hatian",
+    },
+    {
+        "range": "≥ 30",
+        "label": "CUKUP STABIL",
+        "meaning": "Jumlah observasi relatif lebih memadai untuk analisis deskriptif, tetapi bukan jaminan representatif",
+    },
+]
+
 def _stability_label(n, events=None):
     n = int(n or 0)
     if n <= STABILITY_THRESHOLDS["low_max_n"]:
         return "RENDAH"
     if n <= STABILITY_THRESHOLDS["medium_max_n"]:
         return "SEDANG"
-    return "MEMADAI"
+    return "CUKUP STABIL"
 
 def _stability_note(n, events=None):
     label = _stability_label(n, events)
     if label == "RENDAH":
-        return "Ukuran sampel kecil; estimasi dapat tidak stabil dan tidak boleh digeneralisasikan langsung ke populasi."
+        return "Sampel sangat kecil; estimasi mudah berubah; tidak layak untuk generalisasi."
     if label == "SEDANG":
-        return "Ukuran sampel masih perlu kehati-hatian; interpretasi sebaiknya disertai interval ketidakpastian."
-    return "Ukuran sampel relatif lebih memadai untuk screening; validasi eksternal tetap diperlukan."
+        return "Sampel masih terbatas; interpretasi perlu kehati-hatian."
+    return "Jumlah observasi relatif lebih memadai untuk analisis deskriptif, tetapi bukan jaminan representatif."
 
 SEVERITY_FEATURES = ['Umur','Jenis Kelamin','Pekerjaan','Status Imunisasi','Status Komorbid','Riwayat Perjalanan','Faktor Risiko Lain']
 
@@ -315,11 +336,11 @@ def vulnerability_clustering(df):
     strata['Stabilitas']=strata['Jumlah_Observasi'].map(_stability_label)
     strata['Interpretasi']=np.where(
         strata['Stabilitas'].eq('RENDAH'),
-        'Sinyal prioritas pada dataset; estimasi tidak stabil dan tidak langsung digeneralisasikan.',
+        'Sampel sangat kecil; estimasi mudah berubah; tidak layak untuk generalisasi.',
         np.where(
             strata['Stabilitas'].eq('SEDANG'),
-            'Sinyal surveillance; interpretasikan bersama interval ketidakpastian dan konteks populasi.',
-            'Strata relatif lebih stabil untuk screening; tetap memerlukan validasi eksternal.'
+            'Sampel masih terbatas; interpretasi perlu kehati-hatian.',
+            'Jumlah observasi relatif lebih memadai untuk analisis deskriptif, tetapi bukan jaminan representatif.'
         )
     )
     strata['Usia']=strata['Age_Group']
@@ -355,6 +376,8 @@ def vulnerability_clustering(df):
         'vulnerability_strata':strata[display_cols],
         'top_stratum':strata.iloc[0].to_dict() if not strata.empty else None,
         'method':'KMeans exploratory clustering + explicit vulnerability stratification',
+        'stability_guide':STABILITY_GUIDE,
+        'stability_definition':'Stabilitas observasi adalah screening berbasis jumlah observasi untuk membantu membaca kestabilan deskriptif; bukan ukuran representativitas populasi, validasi model, atau risiko individu.',
         'guardrail':'Observed CFR in small strata is an unstable descriptive signal, not population risk.'
     }
 

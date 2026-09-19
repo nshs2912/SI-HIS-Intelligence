@@ -1114,6 +1114,25 @@ else:
     with tabs[5]:
         st.markdown('### 🤖 Analisis ML')
         orch=result.get('intelligence_orchestration',{})
+        incident=result.get('incident_reasoning_v2',{})
+        if isinstance(incident,dict):
+            st.markdown('### 🚨 Incident & Outbreak Reasoning v2')
+            st.caption('Menggabungkan temporal burst, spatio-temporal cluster, sindrom gejala, attack rate, facility surge, severity/mortality burst, exposure, dan corroboration lingkungan. Skor adalah triage internal.')
+            ic1,ic2,ic3=st.columns(3)
+            ic1.metric('Evidence Score',str(incident.get('evidence_score','-'))+'/100')
+            ic2.metric('Priority',str(incident.get('priority','-')))
+            ic3.metric('Status',str(incident.get('status','-')))
+            sig=incident.get('signals',[])
+            if sig: st.warning('Sinyal: '+', '.join(map(str,sig)))
+            with st.expander('🔬 Detail Incident Reasoning',expanded=bool(sig)):
+                render_value(incident.get('temporal'),'Multi-window temporal scan')
+                render_value(incident.get('spatiotemporal'),'Spatial-temporal finest unit')
+                render_value(incident.get('symptom_syndromes'),'Symptom / syndrome clustering')
+                render_value(incident.get('attack_rate'),'Exposed vs non-exposed / attack rate')
+                render_value(incident.get('facility_surge'),'Facility surge')
+                render_value(incident.get('severity_mortality'),'Severity & mortality burst')
+                render_value(incident.get('environmental'),'Environmental / incident corroboration')
+                render_value(incident.get('hypotheses'),'Differential hypotheses')
         if isinstance(orch,dict):
             st.markdown('### 🧠 SI-HIS Intelligence Orchestrator')
             st.caption('Lapisan orkestrasi menggabungkan sinyal temporal, spasial, unit terkecil, acute-event, disease context, uncertainty, dan hasil ML. Ini adalah triage intelligence, bukan diagnosis atau penetapan KLB/bencana.')

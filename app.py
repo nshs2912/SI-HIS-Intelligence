@@ -1138,6 +1138,23 @@ else:
                 render_value(incident.get('severity_mortality'),'Severity & mortality burst')
                 render_value(incident.get('environmental'),'Environmental / incident corroboration')
                 render_value(incident.get('hypotheses'),'Differential hypotheses')
+        tox=result.get('toxicology_intelligence',{})
+        if isinstance(tox,dict):
+            st.markdown('### ☣️ Acute Toxicology & Poisoning Intelligence')
+            st.caption('Menganalisis rute paparan, onset, pola gejala/tanda klinis, tipe agen, dan kandidat etiologi. Kandidat agen bukan diagnosis dan memerlukan konfirmasi klinis, epidemiologis, laboratorium, atau toksikologi.')
+            tc1,tc2=st.columns(2)
+            tc1.metric('Status',str(tox.get('status','-')))
+            tc2.metric('Median Paparan → Onset',str(tox.get('median_exposure_to_onset_hours','-'))+' jam')
+            routes=tox.get('detected_routes',[])
+            if routes: st.info('Rute paparan terdeteksi: **'+', '.join(map(str,routes))+'**')
+            candidates=tox.get('candidates',[])
+            if candidates:
+                st.markdown('#### Kandidat Agen Penyebab — Differential Support')
+                st.dataframe(pd.DataFrame(candidates)[['agent','agent_type','score','typical_onset','route','clinical_syndrome']],use_container_width=True,hide_index=True)
+                st.caption('Urutan kandidat adalah hasil pattern matching internal, bukan probabilitas diagnosis. Konfirmasi etiologi memerlukan bukti paparan dan pemeriksaan yang sesuai.')
+            with st.expander('🔬 Knowledge Base Agen, Gejala, Onset & Paparan'):
+                profiles=tox.get('profiles',[])
+                if profiles: st.dataframe(pd.DataFrame(profiles),use_container_width=True,hide_index=True)
         if isinstance(orch,dict):
             st.markdown('### 🧠 SI-HIS Intelligence Orchestrator')
             st.caption('Lapisan orkestrasi menggabungkan sinyal temporal, spasial, unit terkecil, acute-event, disease context, uncertainty, dan hasil ML. Ini adalah triage intelligence, bukan diagnosis atau penetapan KLB/bencana.')

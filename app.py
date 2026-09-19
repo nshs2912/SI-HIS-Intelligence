@@ -20,6 +20,7 @@ from core.downloads import build_evaluation_excel, build_evaluation_csv, build_r
 from core.engine import SIHISIntelligenceEngine
 from core.disease_intelligence import classify_disease
 from core.scope import QueryScope
+from core.workforce_intelligence import build_workforce_intelligence, workforce_policy_narrative
 warnings.filterwarnings('ignore')
 st.set_page_config(page_title='SI-HIS — Continuous Health Intelligence',page_icon='🧠',layout='wide')
 st.markdown('''<div style="padding:26px 30px 24px;border-radius:16px;border:1px solid #cbd5e1;background:linear-gradient(135deg,#f8fafc 0%,#eef6ff 100%);box-shadow:0 4px 18px rgba(15,23,42,.06);"><div style="font-size:.92rem;letter-spacing:.12em;text-transform:uppercase;color:#64748b;font-weight:700;">SI-HIS</div><h1 style="margin:4px 0 2px;color:#0f172a;font-size:2.05rem;">Smart Integrated Health Intelligence System</h1><div style="font-size:1.25rem;color:#1d4ed8;font-weight:800;margin-top:14px;">CONTINUOUS HEALTH INTELLIGENCE ENGINE</div><div style="margin-top:7px;color:#475569;font-weight:600;">Data → Intelligence → Prediction → Prescription → Outcome → New Data → Continuous Learning</div><div style="height:1px;background:#cbd5e1;margin:20px 0 17px;"></div><div style="font-size:.95rem;letter-spacing:.08em;text-transform:uppercase;color:#64748b;font-weight:700;">Powered by SI-HIS</div><div style="font-size:1.35rem;color:#0f172a;font-weight:800;margin-top:3px;">NutriMed MyLab</div><div style="font-size:1.02rem;color:#334155;font-weight:700;margin-top:3px;">Personal Health Companion &amp; Longitudinal Health Journey</div><div style="margin-top:12px;color:#475569;font-style:italic;">From Individual Health to Population Health — and Back.</div></div>''',unsafe_allow_html=True)
@@ -1065,7 +1066,7 @@ for col in ['Diagnosis Konfirm','Diagnosis Probabel','Diagnosis Suspek']:
 sel_disease=st.sidebar.selectbox('3. Diagnosis Penyakit',['Semua Penyakit']+sorted(disease_values))
 with st.sidebar.expander('Drill-down wilayah (opsional)'):
     kecs=sorted(dfk['Kecamatan'].dropna().astype(str).unique()) if 'Kecamatan' in dfk else [];sel_kec=st.selectbox('Kecamatan',['Semua Kecamatan']+kecs);dbase=dfk if sel_kec=='Semua Kecamatan' else dfk[dfk['Kecamatan'].astype(str).eq(sel_kec)];villages=sorted(dbase['Desa/Kelurahan'].dropna().astype(str).unique()) if 'Desa/Kelurahan' in dbase else [];sel_desa=st.selectbox('Desa/Kelurahan',['Semua Desa/Kelurahan']+villages);vbase=dbase if sel_desa=='Semua Desa/Kelurahan' else dbase[dbase['Desa/Kelurahan'].astype(str).eq(sel_desa)];pusk=sorted(vbase['Puskesmas'].dropna().astype(str).unique()) if 'Puskesmas' in vbase else [];sel_pusk=st.selectbox('Puskesmas',['Semua Puskesmas']+pusk)
-include_ml=st.sidebar.checkbox('Aktifkan ML layer',False);scope=QueryScope(province=None if sel_prov=='Semua Provinsi' else sel_prov,district=None if sel_kab=='Semua Kabupaten/Kota' else sel_kab,kecamatan=None if sel_kec=='Semua Kecamatan' else sel_kec,village=None if sel_desa=='Semua Desa/Kelurahan' else sel_desa,puskesmas=None if sel_pusk=='Semua Puskesmas' else sel_pusk,disease=None if sel_disease=='Semua Penyakit' else sel_disease,period_days=3650)
+include_ml=st.sidebar.checkbox('Aktifkan ML layer',False);corporate_mode=st.sidebar.checkbox('🏢 Workforce Health Intelligence',False);scope=QueryScope(province=None if sel_prov=='Semua Provinsi' else sel_prov,district=None if sel_kab=='Semua Kabupaten/Kota' else sel_kab,kecamatan=None if sel_kec=='Semua Kecamatan' else sel_kec,village=None if sel_desa=='Semua Desa/Kelurahan' else sel_desa,puskesmas=None if sel_pusk=='Semua Puskesmas' else sel_pusk,disease=None if sel_disease=='Semua Penyakit' else sel_disease,period_days=3650)
 if sel_disease=='Semua Penyakit':
     result=engine.descriptive(dfk);label=sel_kab if sel_kab!='Semua Kabupaten/Kota' else (sel_prov if sel_prov!='Semua Provinsi' else 'Indonesia');st.markdown(f'## 📊 Analisis Deskriptif — {label}');ov=result['overview'];a,b=st.columns(2);a.metric('Total Kunjungan Pasien',f"{ov['total_cases']:,}");b.metric('Kasus Meninggal',f"{ov['deaths']:,}");st.markdown('### Resume Epidemiologi');show_resume(descriptive_expert(result,label));st.markdown('### 🏆 10 Besar Penyakit');show_resume('Tabel ini menunjukkan penyakit dengan beban kasus terbesar dalam scope yang dipilih. Jumlah kasus menggambarkan beban absolut; CFR menggambarkan proporsi kematian di antara kasus dan tidak boleh ditafsirkan sebagai mortality rate populasi tanpa denominator yang sesuai.');render_value(result['top10_diseases']);st.markdown('### Distribusi');show_resume('Distribusi berikut memperlihatkan komposisi kasus menurut penyakit, jenis kelamin, kelompok umur, provinsi, dan kabupaten/kota. Perbedaan jumlah kasus adalah temuan deskriptif dan tidak otomatis menunjukkan perbedaan risiko.');render_value(result['disease_distribution']);render_value(result['sex_distribution'],'Jenis Kelamin');render_value(result['age_distribution'],'Kelompok Umur');render_value(result['province_distribution'],'Provinsi');render_value(result['district_distribution'].head(50),'Kabupaten/Kota')
 else:
@@ -1231,4 +1232,60 @@ else:
             if include_ml:render_ml_report(result.get('ml'),sel_disease,label)
             else:st.info('ML layer belum diaktifkan. Centang **Aktifkan ML layer** pada Panel Kontrol untuk menjalankan prediction models.')
     
+def render_workforce_dashboard(df, company_name="Perusahaan"):
+    """Corporate aggregate workforce-health dashboard linked to NutriMed MyLab."""
+    st.markdown("## 🏢 Workforce Health Intelligence — NutriMed MyLab")
+    st.caption("Karyawan = user NutriMed MyLab; perusahaan menerima intelligence populasi secara agregat. Prototype ini tidak mengekspos rekam kesehatan individual.")
+    result=build_workforce_intelligence(df,company_name)
+    if result.get("status")!="ok":
+        st.warning(result.get("message","Data workforce belum tersedia."))
+        return
+    m=result.get("overview",{})
+    st.markdown("### 📊 Executive Workforce Health Dashboard")
+    cards=[("Observasi kesehatan",m.get("employees_observed",0)),("Departemen",m.get("departments","N/A")),("Lokasi/site",m.get("sites","N/A")),("Sinyal komorbid (%)",m.get("comorbidity_prevalence_pct","N/A")),("BMI ≥25 (%)",m.get("bmi_high_pct","N/A")),("Sinyal tekanan darah ≥140 (%)",m.get("high_bp_signal_pct","N/A"))]
+    cols=st.columns(3)
+    for i,(labelv,val) in enumerate(cards):
+        cols[i%3].metric(labelv, f"{val:,}" if isinstance(val,(int,np.integer)) else (f"{val:.2f}%" if isinstance(val,(float,np.floating)) else str(val)))
+    st.markdown("### 🧭 Cara Membaca untuk Manajemen")
+    st.info("Dashboard ini menggambarkan **kesehatan populasi workforce**, bukan kondisi individu. Gunakan untuk perencanaan program promotif-preventif, occupational health, kapasitas layanan, dan evaluasi outcome.")
+    st.markdown(workforce_policy_narrative(result))
+    st.markdown("### 1️⃣ Analisis Segmentasi Workforce")
+    seg=result.get("segment_analysis")
+    if isinstance(seg,pd.DataFrame) and not seg.empty: st.dataframe(seg,use_container_width=True,hide_index=True)
+    else: st.info("Segmentasi belum dapat ditampilkan; pastikan kolom unit/lokasi/pekerjaan tersedia dan cohort memenuhi ambang minimum.")
+    st.markdown("### 2️⃣ Analisis Temporal")
+    temporal=result.get("temporal")
+    if isinstance(temporal,pd.DataFrame) and not temporal.empty:
+        st.line_chart(temporal.set_index("Tanggal")["Health_Events"]); st.dataframe(temporal,use_container_width=True,hide_index=True)
+    else: st.info("Data tanggal belum mencukupi untuk analisis temporal workforce.")
+    st.markdown("### 3️⃣ Predictive Workforce Health")
+    pred=result.get("predictive",{})
+    if pred.get("status")=="ok":
+        p1,p2,p3=st.columns(3); p1.metric("Mean predicted risk",f"{pred.get('mean_predicted_risk_pct',0):.2f}%"); p2.metric("High-risk signal",f"{pred.get('high_risk_signal_pct',0):.2f}%"); p3.metric("Holdout",str(pred.get("holdout_rows","N/A")))
+        st.caption("Model predictive hanya berjalan jika perusahaan menyediakan target risiko/MCU yang tervalidasi. Probabilitas digunakan sebagai sinyal agregat untuk perencanaan, bukan penilaian individu.")
+    else: st.info(pred.get("message","Predictive model belum tersedia."))
+    st.markdown("### 4️⃣ Preventive & Prescriptive Health Program")
+    st.markdown("""
+**Contoh alur intervensi populasi yang dapat dikonfigurasi:**
+- **Preventive:** health education, physical-activity program, nutrition program, smoking cessation, vaccination/occupational-health program sesuai risiko dan regulasi.
+- **Early detection:** undangan skrining/MCU ulang berdasarkan kelompok dan kebutuhan program.
+- **Clinical pathway:** karyawan yang memilih/berhak mendapat layanan dapat diarahkan ke dokter, laboratorium, dietitian, farmasi atau provider kesehatan melalui NutriMed MyLab.
+- **Prescriptive analytics:** sistem dapat menyarankan *program-level actions* berdasarkan pola workforce, tetapi keputusan klinis individual tetap pada tenaga kesehatan.
+- **Outcome:** perusahaan memonitor perubahan indikator agregat, uptake program, dan outcome setelah intervensi.
+""")
+    st.markdown("### 5️⃣ Arsitektur Karyawan → Korporasi")
+    st.code("""KARYAWAN
+   ↓
+NutriMed MyLab — Personal Health Companion
+   ↓ consent / lawful processing + secure health data
+SI-HIS Intelligence
+   ↓
+Descriptive → Analytical → Predictive → Preventive/Prescriptive
+   ↓
+CORPORATE WORKFORCE HEALTH DASHBOARD
+   ↓
+Program K3/occupational health → prevention → referral → outcome
+   ↺ feedback to NutriMed MyLab""")
+    st.warning("Governance: data kesehatan adalah data pribadi spesifik. Dashboard korporat harus menggunakan minimisasi data, agregasi, access control, audit trail, dan cohort suppression. Prototype memakai minimum cohort 10; ambang produksi perlu ditetapkan bersama governance/legal/DPO perusahaan.")
+
 st.caption('SI-HIS Intelligence — epidemiological decision-support with TIME + PERSON + PLACE.')

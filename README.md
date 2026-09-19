@@ -86,3 +86,16 @@ Run core tests:
 ```bash
 pytest -q
 ```
+
+## Data source modes
+
+The prototype now exposes two explicit data modes:
+
+- DEMO / Synthetic Nasional — safe for presentations, development and testing.
+- FACTUAL / Operational — accepts factual CSV/Excel through the canonical ingestion boundary during the prototype phase.
+
+The factual source registry is designed for future adapters from SIMPUS, FKTP, hospital/RME, NutriMed MyLab Mobile, doctor/dietitian/physiotherapy networks, radiology, laboratory/LIS, pharmacy and other supporting services.
+
+The intelligence engine is intentionally source-agnostic. IT integrations should map each source into the canonical SI-HIS schema before analytics are executed.
+
+See docs/DATA_INTEGRATION_ARCHITECTURE.md for the adapter contract and recommended production flow.

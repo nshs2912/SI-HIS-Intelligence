@@ -1,9 +1,6 @@
 """Regulatory boundary contracts for SI-HIS.
 
-This module is intentionally descriptive: it does not determine legal
-classification. It keeps population-health information-system functions
-separate from clinical/SaMD candidate functions so intended purpose, risk,
-validation and governance can be assessed independently.
+Engineering/governance boundary only; not a legal classification. Population-health intelligence is separated from individual clinical decision support whose intended purpose may place it in a SaMD/medical-device pathway.
 """
 from dataclasses import dataclass, asdict
 from typing import Literal
@@ -17,6 +14,8 @@ class RegulatoryBoundary:
     intended_purpose: str
     primary_user: str
     clinical_decision_support: bool
+    individual_patient_output: bool = False
+    diagnostic_or_treatment_recommendation: bool = False
     autonomous_diagnosis_or_treatment: bool = False
     human_review_required: bool = True
     traceability_required: bool = True
@@ -27,7 +26,7 @@ class RegulatoryBoundary:
 POPULATION_BOUNDARY = RegulatoryBoundary(
     module="Population Intelligence",
     domain="HEALTH_INFORMATION_SYSTEM",
-    intended_purpose="Population-level surveillance, descriptive analytics, forecasting and decision support.",
+    intended_purpose="Population-level surveillance, epidemiology, forecasting, spatial intelligence and public-health decision support.",
     primary_user="Kemenkes/Dinkes/facility/public-health authorized users",
     clinical_decision_support=False,
 )
@@ -35,29 +34,36 @@ POPULATION_BOUNDARY = RegulatoryBoundary(
 CLINICAL_BOUNDARIES = {
     "laboratory": RegulatoryBoundary(
         "Laboratory Intelligence","CLINICAL_SAMD_CANDIDATE",
-        "Analyze laboratory data and generate laboratory review/recommendation signals.",
-        "Laboratory professional/authorized clinician", True),
+        "Analyze individual laboratory data and generate patient-specific clinical review or diagnostic decision-support recommendations.",
+        "Laboratory professional/authorized clinician", True,
+        individual_patient_output=True, diagnostic_or_treatment_recommendation=True),
     "pharmacy": RegulatoryBoundary(
         "Pharmacy Intelligence","CLINICAL_SAMD_CANDIDATE",
-        "Analyze medication use, interactions, safety and adverse-event signals.",
-        "Pharmacist/authorized clinician", True),
+        "Analyze individual medication data for patient-specific medication safety, interaction, adherence or adverse-event decision support.",
+        "Pharmacist/authorized clinician", True,
+        individual_patient_output=True, diagnostic_or_treatment_recommendation=True),
     "dietitian": RegulatoryBoundary(
         "Dietitian Intelligence","CLINICAL_SAMD_CANDIDATE",
-        "Analyze clinical, laboratory, medication and nutrition data for nutrition decision support.",
-        "Dietitian/authorized clinician", True),
+        "Analyze individual clinical, laboratory, medication and nutrition data for patient-specific nutrition decision support.",
+        "Dietitian/authorized clinician", True,
+        individual_patient_output=True, diagnostic_or_treatment_recommendation=True),
     "clinical_journey": RegulatoryBoundary(
         "Clinical Journey Intelligence","CLINICAL_SAMD_CANDIDATE",
-        "Summarize longitudinal care, detect care gaps and support clinical review.",
-        "Authorized healthcare professional", True),
+        "Interpret an individual longitudinal clinical journey to support patient-specific diagnosis, follow-up, risk or treatment decisions.",
+        "Authorized healthcare professional", True,
+        individual_patient_output=True, diagnostic_or_treatment_recommendation=True),
     "patient_summary": RegulatoryBoundary(
         "Patient Clinical Summary","CLINICAL_SAMD_CANDIDATE",
-        "Generate role-based, evidence-traceable summaries from authorized longitudinal patient data.",
-        "Authorized healthcare professional", True),
+        "Generate an evidence-traceable individual patient summary for clinical decision support.",
+        "Authorized healthcare professional", True,
+        individual_patient_output=True),
 }
 
 def regulatory_inventory():
     return {
         "population": POPULATION_BOUNDARY.to_dict(),
         "clinical": {k:v.to_dict() for k,v in CLINICAL_BOUNDARIES.items()},
-        "separation_rule": "Population intelligence is not a clinical/SaMD decision engine; clinical modules have independent intended purpose, validation, safety and change-control scope.",
+        "separation_rule": (
+            "Population intelligence remains a Health Information System/public-health surveillance function. Individual-patient analytics that make or support diagnostic, treatment, triage, prognosis or other clinical recommendations are routed to the clinical/SaMD candidate boundary and require independent intended-purpose, risk, validation, safety and change-control assessment."
+        ),
     }

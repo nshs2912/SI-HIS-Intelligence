@@ -44,24 +44,6 @@ def render_ews_summary(ews, rt=None):
             interp='Kurva menunjukkan penurunan relatif pada periode terbaru.' if float(recent)<1 else ('Kurva menunjukkan pertumbuhan relatif pada periode terbaru.' if float(recent)>1 else 'Kurva relatif stabil pada periode terbaru.')
             st.caption(interp)
 
-def dbscan_resume(spatial):
-    if not isinstance(spatial,pd.DataFrame) or spatial.empty:
-        return 'Belum tersedia hasil DBSCAN untuk scope ini.'
-    if 'Cluster' not in spatial.columns:
-        return f"Tabel spasial memuat **{len(spatial):,} observasi**, tetapi label cluster DBSCAN belum tersedia."
-    clnum=pd.to_numeric(spatial['Cluster'],errors='coerce')
-    valid=clnum.dropna()
-    noise=int((valid==-1).sum())
-    clusters=valid[valid!=-1]
-    parts=[f"DBSCAN mengidentifikasi **{int(clusters.nunique())} cluster** pada **{len(spatial):,} observasi spasial**."]
-    if noise: parts.append(f"Sebanyak **{noise:,} observasi** diklasifikasikan sebagai noise/outlier spasial.")
-    counts=clusters.value_counts()
-    if not counts.empty:
-        top_id=counts.index[0]
-        top_n=int(counts.iloc[0])
-        parts.append(f"Cluster terbesar adalah **Cluster {int(top_id) if float(top_id).is_integer() else top_id}** dengan **{top_n:,} observasi**.")
-    return ' '.join(parts)+" Hasil DBSCAN merupakan sinyal konsentrasi spasial, bukan bukti otomatis sumber penularan atau hubungan kausal; interpretasi harus dikaitkan dengan TIME, PERSON, paparan, dan investigasi lapangan."
-
 def outcome_summary(outcome_name, outcome):
     if not isinstance(outcome,dict):
         return f"**{outcome_name}:** hasil analisis belum tersedia."
@@ -1078,7 +1060,7 @@ include_ml=st.sidebar.checkbox('Aktifkan ML layer',False);scope=QueryScope(provi
 if sel_disease=='Semua Penyakit':
     result=engine.descriptive(dfk);label=sel_kab if sel_kab!='Semua Kabupaten/Kota' else (sel_prov if sel_prov!='Semua Provinsi' else 'Indonesia');st.markdown(f'## 📊 Analisis Deskriptif — {label}');ov=result['overview'];a,b=st.columns(2);a.metric('Total Kunjungan Pasien',f"{ov['total_cases']:,}");b.metric('Kasus Meninggal',f"{ov['deaths']:,}");st.markdown('### Resume Epidemiologi');show_resume(descriptive_expert(result,label));st.markdown('### 🏆 10 Besar Penyakit');show_resume('Tabel ini menunjukkan penyakit dengan beban kasus terbesar dalam scope yang dipilih. Jumlah kasus menggambarkan beban absolut; CFR menggambarkan proporsi kematian di antara kasus dan tidak boleh ditafsirkan sebagai mortality rate populasi tanpa denominator yang sesuai.');render_value(result['top10_diseases']);st.markdown('### Distribusi');show_resume('Distribusi berikut memperlihatkan komposisi kasus menurut penyakit, jenis kelamin, kelompok umur, provinsi, dan kabupaten/kota. Perbedaan jumlah kasus adalah temuan deskriptif dan tidak otomatis menunjukkan perbedaan risiko.');render_value(result['disease_distribution']);render_value(result['sex_distribution'],'Jenis Kelamin');render_value(result['age_distribution'],'Kelompok Umur');render_value(result['province_distribution'],'Provinsi');render_value(result['district_distribution'].head(50),'Kabupaten/Kota')
 else:
-    disease_profile_pre=classify_disease(sel_disease);vector_borne=str(disease_profile_pre.transmission).lower()=='vector-borne';effective_include_ml=include_ml and not vector_borne;result=engine.analyze(df_raw,scope=scope,include_ml=effective_include_ml,mode='epidemiology');label=sel_kab if sel_kab!='Semua Kabupaten/Kota' else (sel_prov if sel_prov!='Semua Provinsi' else 'Indonesia');st.markdown(f'## 🧬 Analisis Epidemiologi — {sel_disease}');st.caption(f'Scope: **{sel_disease} — {label}** | TIME + PERSON + PLACE')
+    disease_profile_pre=classify_disease(sel_disease);vector_borne=(str(disease_profile_pre.subgroup).lower()=='vector-borne' or str(disease_profile_pre.transmission).lower()=='vector-borne');effective_include_ml=include_ml and not vector_borne;result=engine.analyze(df_raw,scope=scope,include_ml=effective_include_ml,mode='epidemiology');label=sel_kab if sel_kab!='Semua Kabupaten/Kota' else (sel_prov if sel_prov!='Semua Provinsi' else 'Indonesia');st.markdown(f'## 🧬 Analisis Epidemiologi — {sel_disease}');st.caption(f'Scope: **{sel_disease} — {label}** | TIME + PERSON + PLACE')
     if not result.get('eligible',False):st.warning('Analisis epidemiologi belum dapat dijalankan.');render_value(result.get('eligibility'));st.stop()
     total=int(result['overview']['total_cases']);mortality=result.get('mortality');deaths=int(mortality.get('deaths',mortality.get('meninggal',0)) or 0) if isinstance(mortality,dict) else 0;cfr=deaths/total*100 if total else 0;a,b,c=st.columns(3);a.metric(f'Total {sel_disease}',f'{total:,}');b.metric('Meninggal',f'{deaths:,}');c.metric('CFR — tingkat kematian akibat penyakit',f'{cfr:.2f}%')
     # Navigation Bar utama tetap horizontal di atas. Setiap tab memiliki resume sendiri tepat di bawah tab.
@@ -1148,8 +1130,6 @@ else:
         st.markdown('### 🗺️ Peta Spasial & AI DBSCAN')
         spatial=result.get('spatial')
         show_tab_resume('Resume Spatial Epidemiology',spatial_expert(spatial,sel_disease),'peta, cluster dan tabel Hasil DBSCAN di bawah')
-        st.markdown('#### 🧭 Resume Hasil DBSCAN')
-        st.info(dbscan_resume(spatial))
         st.caption('Analisis spasial, cluster dan episentrum digunakan untuk memperkuat interpretasi PLACE pada resume epidemiologi.');
         render_value(spatial,'Hasil DBSCAN')
         if isinstance(spatial,pd.DataFrame) and not spatial.empty and {'Latitude','Longitude'}.issubset(spatial.columns):
@@ -1204,7 +1184,7 @@ else:
                     render_value(incident.get('environmental'),'Environmental / incident corroboration')
                     render_value(incident.get('hypotheses'),'Differential hypotheses')
             tox=result.get('toxicology_intelligence',{})
-            if isinstance(tox,dict):
+            if isinstance(tox,dict) and tox.get('enabled',True):
                 st.markdown('### ☣️ Acute Toxicology & Poisoning Intelligence')
                 st.caption('Menganalisis rute paparan, onset, pola gejala/tanda klinis, tipe agen, dan kandidat etiologi. Kandidat agen bukan diagnosis dan memerlukan konfirmasi klinis, epidemiologis, laboratorium, atau toksikologi.')
                 tc1,tc2=st.columns(2)

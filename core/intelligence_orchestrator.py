@@ -43,14 +43,15 @@ def multi_window_scan(df: pd.DataFrame, windows_minutes=(15, 30, 60, 180, 360, 7
     if onset.empty:
         return {"status": "insufficient_data", "windows": []}
     rows = []
+    onset_values = onset.astype("int64").to_numpy()
     for minutes in windows_minutes:
+        delta_ns = int(pd.Timedelta(minutes=int(minutes)).value)
+        right = np.searchsorted(onset_values, onset_values + delta_ns, side="right")
+        counts = right - np.arange(len(onset_values))
+        best_idx = int(np.argmax(counts)) if len(counts) else 0
+        best_n = int(counts[best_idx]) if len(counts) else 0
+        best_start = onset.iloc[best_idx] if len(onset) else None
         delta = pd.Timedelta(minutes=int(minutes))
-        best_n = 0
-        best_start = None
-        for t in onset.iloc:
-            n = int(((onset >= t) & (onset <= t + delta)).sum())
-            if n > best_n:
-                best_n, best_start = n, t
         rows.append({
             "window_minutes": int(minutes),
             "cases": best_n,

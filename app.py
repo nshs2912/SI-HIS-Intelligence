@@ -803,6 +803,9 @@ def render_ml_report(ml):
     _render_signal_table('8. Spatial-Neighbor Intelligence','Menghitung beban kasus pada desa sekitar berdasarkan jarak geografis untuk memperkaya fitur spasial; tidak menyimpulkan hubungan penularan.',ci.get('spatial_neighbor'))
     _render_signal_table('9. Vulnerability Clustering','KMeans mengelompokkan profil kerentanan berbasis karakteristik person yang tersedia. Cluster bersifat eksploratif dan perlu validasi epidemiologis.',ci.get('vulnerability_clustering'))
     _render_signal_table('10. Continuous Signal Prioritization','Menggabungkan anomaly, change-point, dan growth signal menjadi antrean prioritas yang transparan untuk surveillance/investigasi.',ci.get('signal_prioritization'))
+    _render_signal_table('11. Spatio-Temporal Risk','Menggabungkan beban kasus terbaru dengan beban wilayah sekitar untuk membentuk sinyal risiko spatio-temporal.',ci.get('spatiotemporal_risk'))
+    _render_signal_table('12. TIME + PERSON + PLACE Risk','Menggabungkan dimensi waktu, karakteristik person, dan lokasi menjadi skor prioritas surveillance yang transparan.',ci.get('time_person_place_risk'))
+    _render_signal_table('13. Disease-Specific Growth Model','Mengestimasi pertumbuhan spesifik penyakit menggunakan model log-linear pada deret waktu kasus.',ci.get('disease_specific_growth'))
 
     st.markdown('### III. Model Validation & Operational Readiness')
     st.markdown('Model classifier menampilkan **ROC-AUC, PR-AUC, precision, recall, specificity, F1 dan Brier score** pada holdout temporal. Feature importance dibaca sebagai sinyal prediktif, bukan bukti kausal. Untuk tahap produksi, SI-HIS perlu mempertahankan calibration monitoring, PSI/data-drift monitoring, model registry/versioning, external validation, dan audit trail setiap prediction run.')

@@ -5,13 +5,15 @@ Streamlit application. New code should import explicit modules directly:
 ``data_provider``, ``scope``, ``statistics``, ``analytics`` and ``ml_engine``.
 """
 
-__version__ = "0.3.1"
+__version__ = "0.4.0"
 
 from . import analytics as _analytics
 from .data_provider import get_cases, get_metadata, get_cases_copy, validate_case_schema
 from .scope import QueryScope, apply_scope, scope_label
 from .statistics import AGE_GROUPS, add_age_groups, hitung_bivariat_lengkap, multivariable_logistic
 from .national_dummy import generate_national_dummy
+from .clinical_intelligence import ClinicalIntelligenceEngine
+from .regulatory_boundary import regulatory_inventory
 
 # Transitional compatibility only: legacy app.py imports these symbols from
 # core.analytics. No dataset is mutated; the generator returns a deep copy.

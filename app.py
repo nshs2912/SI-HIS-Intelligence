@@ -1177,7 +1177,7 @@ else:
         render_risk_factors(result.get('risk_factors'))
     if not vector_borne:
         with tabs[5]:
-                st.markdown('### 🤖 Analisis ML')
+            st.markdown('### 🤖 Analisis ML')
             orch=result.get('intelligence_orchestration',{})
             incident=result.get('incident_reasoning_v2',{})
             disease_profile=result.get('disease_intelligence',{}) if isinstance(result.get('disease_intelligence',{}),dict) else {}

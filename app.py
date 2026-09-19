@@ -690,12 +690,19 @@ def vulnerable_narrative(v):
     if not isinstance(v,list) or not v:return 'Belum ditemukan profil populasi rentan yang memenuhi batas minimal analisis.'
     d=pd.DataFrame(v);top=d.iloc[0];return f"Metode menggunakan stratifikasi **Kelompok Umur × Pekerjaan × Status Komorbid**, lalu menghitung kasus, kematian, tingkat kematian akibat penyakit (CFR) dan Risk Multiplier terhadap baseline. Profil teratas: **{top.get('Age_Group','-')} × {top.get('Pekerjaan','-')} × {top.get('Status Komorbid','-')}**, n={int(top.get('Total',0))}, CFR={float(top.get('CFR (%)',0)):.2f}%. Strata kecil harus ditafsirkan hati-hati."
 
-def ml_narrative(ml):
-    if not isinstance(ml,dict) or not ml:return 'ML layer belum dijalankan.'
-    return ('**SI-HIS menggunakan 5 lapisan ML/AI dengan fungsi yang berbeda:** '
-            'prediksi severity, prediksi outbreak 7 hari, prediksi spasial, prediksi populasi rentan, '
-            'dan forecasting temporal. Setiap model harus dibaca melalui target, data, metrik, '
-            'feature importance, keterbatasan, dan status validasinya. Objek Pipeline tidak ditampilkan sebagai hasil analisis.')
+def ml_narrative(ml, disease="penyakit terpilih", label="scope analisis"):
+    """High-level explanation of the ML layer for the currently selected disease/scope."""
+    if not isinstance(ml,dict) or not ml:
+        return f"ML layer belum dijalankan untuk **{disease}** pada **{label}**."
+    primary=ml.get('primary_engines',{})
+    ci=ml.get('continuous_intelligence',{})
+    return (
+        f"**ML SI-HIS untuk {disease} — {label}.** Menu ini membaca lima primary engine dan supporting intelligence "
+        "sebagai satu rangkaian sinyal. Setiap hasil dihitung dari kohort penyakit yang sedang dipilih; ketika filter penyakit "
+        "diubah, data, target, metrik, feature importance, forecast, dan sinyal harus dibaca ulang. "
+        f"Pada run ini tersedia **{len(primary) if isinstance(primary,dict) else 0} primary engine** dan **{len(ci) if isinstance(ci,dict) else 0} supporting module**. "
+        "Tujuannya bukan menggantikan epidemiolog, klinisi, atau pengambil keputusan, melainkan mempercepat deteksi pola, prioritisasi verifikasi, dan continuous surveillance."
+    )
 
 def _metric_value(v, digits=3):
     try:

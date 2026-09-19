@@ -24,6 +24,62 @@ from core.workforce_intelligence import build_workforce_intelligence, workforce_
 warnings.filterwarnings('ignore')
 st.set_page_config(page_title='SI-HIS — Continuous Health Intelligence',page_icon='🧠',layout='wide')
 st.markdown('''<div style="padding:26px 30px 24px;border-radius:16px;border:1px solid #cbd5e1;background:linear-gradient(135deg,#f8fafc 0%,#eef6ff 100%);box-shadow:0 4px 18px rgba(15,23,42,.06);"><div style="font-size:.92rem;letter-spacing:.12em;text-transform:uppercase;color:#64748b;font-weight:700;">SI-HIS</div><h1 style="margin:4px 0 2px;color:#0f172a;font-size:2.05rem;">Smart Integrated Health Intelligence System</h1><div style="font-size:1.25rem;color:#1d4ed8;font-weight:800;margin-top:14px;">CONTINUOUS HEALTH INTELLIGENCE ENGINE</div><div style="margin-top:7px;color:#475569;font-weight:600;">Data → Intelligence → Prediction → Prescription → Outcome → New Data → Continuous Learning</div><div style="height:1px;background:#cbd5e1;margin:20px 0 17px;"></div><div style="font-size:.95rem;letter-spacing:.08em;text-transform:uppercase;color:#64748b;font-weight:700;">Powered by SI-HIS</div><div style="font-size:1.35rem;color:#0f172a;font-weight:800;margin-top:3px;">NutriMed MyLab</div><div style="font-size:1.02rem;color:#334155;font-weight:700;margin-top:3px;">Personal Health Companion &amp; Longitudinal Health Journey</div><div style="margin-top:12px;color:#475569;font-style:italic;">From Individual Health to Population Health — and Back.</div></div>''',unsafe_allow_html=True)
+def render_workforce_dashboard(df, company_name="Perusahaan"):
+    """Corporate aggregate workforce-health dashboard linked to NutriMed MyLab."""
+    st.markdown("## 🏢 Workforce Health Intelligence — NutriMed MyLab")
+    st.caption("Karyawan = user NutriMed MyLab; perusahaan menerima intelligence populasi secara agregat. Prototype ini tidak mengekspos rekam kesehatan individual.")
+    result=build_workforce_intelligence(df,company_name)
+    if result.get("status")!="ok":
+        st.warning(result.get("message","Data workforce belum tersedia."))
+        return
+    m=result.get("overview",{})
+    st.markdown("### 📊 Executive Workforce Health Dashboard")
+    cards=[("Observasi kesehatan",m.get("employees_observed",0)),("Departemen",m.get("departments","N/A")),("Lokasi/site",m.get("sites","N/A")),("Sinyal komorbid (%)",m.get("comorbidity_prevalence_pct","N/A")),("BMI ≥25 (%)",m.get("bmi_high_pct","N/A")),("Sinyal tekanan darah ≥140 (%)",m.get("high_bp_signal_pct","N/A"))]
+    cols=st.columns(3)
+    for i,(labelv,val) in enumerate(cards):
+        cols[i%3].metric(labelv, f"{val:,}" if isinstance(val,(int,np.integer)) else (f"{val:.2f}%" if isinstance(val,(float,np.floating)) else str(val)))
+    st.markdown("### 🧭 Cara Membaca untuk Manajemen")
+    st.info("Dashboard ini menggambarkan **kesehatan populasi workforce**, bukan kondisi individu. Gunakan untuk perencanaan program promotif-preventif, occupational health, kapasitas layanan, dan evaluasi outcome.")
+    st.markdown(workforce_policy_narrative(result))
+    st.markdown("### 1️⃣ Analisis Segmentasi Workforce")
+    seg=result.get("segment_analysis")
+    if isinstance(seg,pd.DataFrame) and not seg.empty: st.dataframe(seg,use_container_width=True,hide_index=True)
+    else: st.info("Segmentasi belum dapat ditampilkan; pastikan kolom unit/lokasi/pekerjaan tersedia dan cohort memenuhi ambang minimum.")
+    st.markdown("### 2️⃣ Analisis Temporal")
+    temporal=result.get("temporal")
+    if isinstance(temporal,pd.DataFrame) and not temporal.empty:
+        st.line_chart(temporal.set_index("Tanggal")["Health_Events"]); st.dataframe(temporal,use_container_width=True,hide_index=True)
+    else: st.info("Data tanggal belum mencukupi untuk analisis temporal workforce.")
+    st.markdown("### 3️⃣ Predictive Workforce Health")
+    pred=result.get("predictive",{})
+    if pred.get("status")=="ok":
+        p1,p2,p3=st.columns(3); p1.metric("Mean predicted risk",f"{pred.get('mean_predicted_risk_pct',0):.2f}%"); p2.metric("High-risk signal",f"{pred.get('high_risk_signal_pct',0):.2f}%"); p3.metric("Holdout",str(pred.get("holdout_rows","N/A")))
+        st.caption("Model predictive hanya berjalan jika perusahaan menyediakan target risiko/MCU yang tervalidasi. Probabilitas digunakan sebagai sinyal agregat untuk perencanaan, bukan penilaian individu.")
+    else: st.info(pred.get("message","Predictive model belum tersedia."))
+    st.markdown("### 4️⃣ Preventive & Prescriptive Health Program")
+    st.markdown("""
+**Contoh alur intervensi populasi yang dapat dikonfigurasi:**
+- **Preventive:** health education, physical-activity program, nutrition program, smoking cessation, vaccination/occupational-health program sesuai risiko dan regulasi.
+- **Early detection:** undangan skrining/MCU ulang berdasarkan kelompok dan kebutuhan program.
+- **Clinical pathway:** karyawan yang memilih/berhak mendapat layanan dapat diarahkan ke dokter, laboratorium, dietitian, farmasi atau provider kesehatan melalui NutriMed MyLab.
+- **Prescriptive analytics:** sistem dapat menyarankan *program-level actions* berdasarkan pola workforce, tetapi keputusan klinis individual tetap pada tenaga kesehatan.
+- **Outcome:** perusahaan memonitor perubahan indikator agregat, uptake program, dan outcome setelah intervensi.
+""")
+    st.markdown("### 5️⃣ Arsitektur Karyawan → Korporasi")
+    st.code("""KARYAWAN
+   ↓
+NutriMed MyLab — Personal Health Companion
+   ↓ consent / lawful processing + secure health data
+SI-HIS Intelligence
+   ↓
+Descriptive → Analytical → Predictive → Preventive/Prescriptive
+   ↓
+CORPORATE WORKFORCE HEALTH DASHBOARD
+   ↓
+Program K3/occupational health → prevention → referral → outcome
+   ↺ feedback to NutriMed MyLab""")
+    st.warning("Governance: data kesehatan adalah data pribadi spesifik. Dashboard korporat harus menggunakan minimisasi data, agregasi, access control, audit trail, dan cohort suppression. Prototype memakai minimum cohort 10; ambang produksi perlu ditetapkan bersama governance/legal/DPO perusahaan.")
+
 st.caption(f"🕒 Waktu Sistem: {get_wib_time()['full']}")
 engine=SIHISIntelligenceEngine()
 
@@ -1025,6 +1081,10 @@ def render_ml_report(ml, disease=None, label=None):
 
 
 
+if corporate_mode:
+    st.markdown('---')
+    render_workforce_dashboard(df_raw, 'Corporate Workforce')
+
 st.caption('SI-HIS Intelligence — epidemiological decision-support with TIME + PERSON + PLACE.')
 st.sidebar.header('⚙️ Panel Kontrol & Filter')
 source_options=get_source_catalog()
@@ -1232,60 +1292,4 @@ else:
             if include_ml:render_ml_report(result.get('ml'),sel_disease,label)
             else:st.info('ML layer belum diaktifkan. Centang **Aktifkan ML layer** pada Panel Kontrol untuk menjalankan prediction models.')
     
-def render_workforce_dashboard(df, company_name="Perusahaan"):
-    """Corporate aggregate workforce-health dashboard linked to NutriMed MyLab."""
-    st.markdown("## 🏢 Workforce Health Intelligence — NutriMed MyLab")
-    st.caption("Karyawan = user NutriMed MyLab; perusahaan menerima intelligence populasi secara agregat. Prototype ini tidak mengekspos rekam kesehatan individual.")
-    result=build_workforce_intelligence(df,company_name)
-    if result.get("status")!="ok":
-        st.warning(result.get("message","Data workforce belum tersedia."))
-        return
-    m=result.get("overview",{})
-    st.markdown("### 📊 Executive Workforce Health Dashboard")
-    cards=[("Observasi kesehatan",m.get("employees_observed",0)),("Departemen",m.get("departments","N/A")),("Lokasi/site",m.get("sites","N/A")),("Sinyal komorbid (%)",m.get("comorbidity_prevalence_pct","N/A")),("BMI ≥25 (%)",m.get("bmi_high_pct","N/A")),("Sinyal tekanan darah ≥140 (%)",m.get("high_bp_signal_pct","N/A"))]
-    cols=st.columns(3)
-    for i,(labelv,val) in enumerate(cards):
-        cols[i%3].metric(labelv, f"{val:,}" if isinstance(val,(int,np.integer)) else (f"{val:.2f}%" if isinstance(val,(float,np.floating)) else str(val)))
-    st.markdown("### 🧭 Cara Membaca untuk Manajemen")
-    st.info("Dashboard ini menggambarkan **kesehatan populasi workforce**, bukan kondisi individu. Gunakan untuk perencanaan program promotif-preventif, occupational health, kapasitas layanan, dan evaluasi outcome.")
-    st.markdown(workforce_policy_narrative(result))
-    st.markdown("### 1️⃣ Analisis Segmentasi Workforce")
-    seg=result.get("segment_analysis")
-    if isinstance(seg,pd.DataFrame) and not seg.empty: st.dataframe(seg,use_container_width=True,hide_index=True)
-    else: st.info("Segmentasi belum dapat ditampilkan; pastikan kolom unit/lokasi/pekerjaan tersedia dan cohort memenuhi ambang minimum.")
-    st.markdown("### 2️⃣ Analisis Temporal")
-    temporal=result.get("temporal")
-    if isinstance(temporal,pd.DataFrame) and not temporal.empty:
-        st.line_chart(temporal.set_index("Tanggal")["Health_Events"]); st.dataframe(temporal,use_container_width=True,hide_index=True)
-    else: st.info("Data tanggal belum mencukupi untuk analisis temporal workforce.")
-    st.markdown("### 3️⃣ Predictive Workforce Health")
-    pred=result.get("predictive",{})
-    if pred.get("status")=="ok":
-        p1,p2,p3=st.columns(3); p1.metric("Mean predicted risk",f"{pred.get('mean_predicted_risk_pct',0):.2f}%"); p2.metric("High-risk signal",f"{pred.get('high_risk_signal_pct',0):.2f}%"); p3.metric("Holdout",str(pred.get("holdout_rows","N/A")))
-        st.caption("Model predictive hanya berjalan jika perusahaan menyediakan target risiko/MCU yang tervalidasi. Probabilitas digunakan sebagai sinyal agregat untuk perencanaan, bukan penilaian individu.")
-    else: st.info(pred.get("message","Predictive model belum tersedia."))
-    st.markdown("### 4️⃣ Preventive & Prescriptive Health Program")
-    st.markdown("""
-**Contoh alur intervensi populasi yang dapat dikonfigurasi:**
-- **Preventive:** health education, physical-activity program, nutrition program, smoking cessation, vaccination/occupational-health program sesuai risiko dan regulasi.
-- **Early detection:** undangan skrining/MCU ulang berdasarkan kelompok dan kebutuhan program.
-- **Clinical pathway:** karyawan yang memilih/berhak mendapat layanan dapat diarahkan ke dokter, laboratorium, dietitian, farmasi atau provider kesehatan melalui NutriMed MyLab.
-- **Prescriptive analytics:** sistem dapat menyarankan *program-level actions* berdasarkan pola workforce, tetapi keputusan klinis individual tetap pada tenaga kesehatan.
-- **Outcome:** perusahaan memonitor perubahan indikator agregat, uptake program, dan outcome setelah intervensi.
-""")
-    st.markdown("### 5️⃣ Arsitektur Karyawan → Korporasi")
-    st.code("""KARYAWAN
-   ↓
-NutriMed MyLab — Personal Health Companion
-   ↓ consent / lawful processing + secure health data
-SI-HIS Intelligence
-   ↓
-Descriptive → Analytical → Predictive → Preventive/Prescriptive
-   ↓
-CORPORATE WORKFORCE HEALTH DASHBOARD
-   ↓
-Program K3/occupational health → prevention → referral → outcome
-   ↺ feedback to NutriMed MyLab""")
-    st.warning("Governance: data kesehatan adalah data pribadi spesifik. Dashboard korporat harus menggunakan minimisasi data, agregasi, access control, audit trail, dan cohort suppression. Prototype memakai minimum cohort 10; ambang produksi perlu ditetapkan bersama governance/legal/DPO perusahaan.")
-
 st.caption('SI-HIS Intelligence — epidemiological decision-support with TIME + PERSON + PLACE.')

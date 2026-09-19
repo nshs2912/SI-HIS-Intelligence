@@ -17,6 +17,7 @@ from .analytics import deteksi_bentuk_kurva, deteksi_gelombang, hitung_effective
 from .epidemiology import analyze_mortality, analyze_risk, analyze_trias
 from .epidemiology.pipeline import classify_temporal_pattern_for_disease, resolve_disease_profile, validate_scope_for_special_analysis
 from .disease_intelligence import classify_disease, build_infectious_intelligence
+from .acute_event_intelligence import poisoning_vs_disaster_signal
 from .forecasting import holt_winters_forecast
 from .ml_engine import (train_case_severity, train_klb_prediction, train_spatial_outbreak, train_vulnerable_population, robust_forecast, temporal_anomaly_detection, temporal_change_points, growth_risk_prediction, spatial_neighbor_intelligence, vulnerability_clustering, prioritize_continuous_signals, spatiotemporal_risk, time_person_place_risk, disease_specific_growth_model)
 from .scope import QueryScope, apply_scope, scope_label
@@ -182,7 +183,7 @@ class IntelligenceEngine:
             onset=pd.to_datetime(work["Tanggal Onset"],errors="coerce")
             if onset.notna().any():
                 work=work.copy();work["Tanggal Pemeriksaan Asli"]=work.get("Tanggal Sakit");work["Tanggal Sakit"]=onset
-        common={"mode":"epidemiology","eligible":eligibility.eligible,"eligibility":{"reasons":eligibility.reasons,"warnings":eligibility.warnings},"scope":prepared.scope.to_dict(),"overview":{"total_cases":len(work),"provinces":work["Provinsi"].nunique() if "Provinsi" in work else 0,"districts":work["Kabupaten"].nunique() if "Kabupaten" in work else 0,"subdistricts":work["Kecamatan"].nunique() if "Kecamatan" in work else 0,"villages":work["Desa/Kelurahan"].nunique() if "Desa/Kelurahan" in work else 0,"deaths":int(_death_series(work).sum()),"cfr":round(float(_death_series(work).mean()*100),2) if len(work) else 0.0},"disease_profile":profile.__dict__,"disease_intelligence":disease_intel.__dict__,"infectious_intelligence":infectious_intel,"analysis_sections":{"descriptive":None,"person":None,"place":None,"time":None,"spatial":None,"forecast":None,"risk":None,"surveillance":"klb","machine_learning":None},"provenance":{**prepared.provenance,"analysis_mode":"disease_scoped_epidemiology","ml_enabled":bool(include_ml)}}
+        common={"mode":"epidemiology","eligible":eligibility.eligible,"eligibility":{"reasons":eligibility.reasons,"warnings":eligibility.warnings},"scope":prepared.scope.to_dict(),"overview":{"total_cases":len(work),"provinces":work["Provinsi"].nunique() if "Provinsi" in work else 0,"districts":work["Kabupaten"].nunique() if "Kabupaten" in work else 0,"subdistricts":work["Kecamatan"].nunique() if "Kecamatan" in work else 0,"villages":work["Desa/Kelurahan"].nunique() if "Desa/Kelurahan" in work else 0,"deaths":int(_death_series(work).sum()),"cfr":round(float(_death_series(work).mean()*100),2) if len(work) else 0.0},"disease_profile":profile.__dict__,"disease_intelligence":disease_intel.__dict__,"infectious_intelligence":infectious_intel,"acute_event_intelligence":acute_event_intel,"analysis_sections":{"descriptive":None,"person":None,"place":None,"time":None,"spatial":None,"forecast":None,"risk":None,"surveillance":"klb","machine_learning":None},"provenance":{**prepared.provenance,"analysis_mode":"disease_scoped_epidemiology","ml_enabled":bool(include_ml)}}
         # KLB surveillance is evaluated even when the special statistical scope is
         # not eligible, because early detection and data sufficiency are separate.
         common["klb"] = evaluate_klb(work, disease=profile.name, geographic_scope=geographic_level)
@@ -228,7 +229,7 @@ class IntelligenceEngine:
             "primary_engines": {"case_severity":severity,"klb":klb,"spatial":spatial,"vulnerable":vulnerable,"forecast":forecast},
             "case_severity":severity,"klb":klb,"spatial":spatial,"vulnerable":vulnerable,"forecast":forecast,
             "continuous_intelligence": {"temporal_anomaly":anomaly,"change_points":changes,"growth_risk":growth,"spatial_neighbor":neighbor,"vulnerability_clustering":vulnerability,"spatiotemporal_risk":spatiotemporal,"time_person_place_risk":tpp,"disease_specific_growth":disease_growth,"signal_prioritization":continuous},
-            "disease_intelligence": classify_disease(disease).__dict__ if disease else None,"infectious_intelligence": build_infectious_intelligence(df,disease) if disease else None,
+            "disease_intelligence": classify_disease(disease).__dict__ if disease else None,"infectious_intelligence": build_infectious_intelligence(df,disease) if disease else None,"acute_event_intelligence": poisoning_vs_disaster_signal(df),
             "architecture": {"primary_engine_count":5,"supporting_signal_modules":9,"loop":"DATA → ANALYSIS → PREDICTION → PRESCRIPTION → NEW DATA → CONTINUOUS LEARNING"}
         }
         _ML_RESULT_CACHE[cache_key]=copy.deepcopy(result)

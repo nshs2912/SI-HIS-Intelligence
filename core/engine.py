@@ -14,7 +14,7 @@ from .analytics import deteksi_bentuk_kurva, deteksi_gelombang, hitung_effective
 from .epidemiology import analyze_mortality, analyze_risk, analyze_trias
 from .epidemiology.pipeline import classify_temporal_pattern_for_disease, resolve_disease_profile, validate_scope_for_special_analysis
 from .forecasting import holt_winters_forecast
-from .ml_engine import (train_case_severity, train_klb_prediction, train_spatial_outbreak, train_vulnerable_population, robust_forecast, temporal_anomaly_detection, temporal_change_points, growth_risk_prediction, spatial_neighbor_intelligence, vulnerability_clustering, prioritize_continuous_signals)
+from .ml_engine import (train_case_severity, train_klb_prediction, train_spatial_outbreak, train_vulnerable_population, robust_forecast, temporal_anomaly_detection, temporal_change_points, growth_risk_prediction, spatial_neighbor_intelligence, vulnerability_clustering, prioritize_continuous_signals, spatiotemporal_risk, time_person_place_risk, disease_specific_growth_model)
 from .scope import QueryScope, apply_scope, scope_label
 from .spatial import compute_epicenter, analyze_spatial
 from .statistics import hitung_bivariat_lengkap
@@ -184,6 +184,9 @@ class IntelligenceEngine:
         growth=growth_risk_prediction(df)
         neighbor=spatial_neighbor_intelligence(df)
         vulnerability=vulnerability_clustering(df)
+        spatiotemporal=spatiotemporal_risk(df)
+        tpp=time_person_place_risk(df)
+        disease_growth=disease_specific_growth_model(df)
         continuous=prioritize_continuous_signals(anomaly,changes,growth,neighbor)
         severity=train_case_severity(df)
         klb=train_klb_prediction(df)
@@ -193,8 +196,8 @@ class IntelligenceEngine:
         return {
             "primary_engines": {"case_severity":severity,"klb":klb,"spatial":spatial,"vulnerable":vulnerable,"forecast":forecast},
             "case_severity":severity,"klb":klb,"spatial":spatial,"vulnerable":vulnerable,"forecast":forecast,
-            "continuous_intelligence": {"temporal_anomaly":anomaly,"change_points":changes,"growth_risk":growth,"spatial_neighbor":neighbor,"vulnerability_clustering":vulnerability,"signal_prioritization":continuous},
-            "architecture": {"primary_engine_count":5,"supporting_signal_modules":6,"loop":"DATA → ANALYSIS → PREDICTION → PRESCRIPTION → NEW DATA → CONTINUOUS LEARNING"}
+            "continuous_intelligence": {"temporal_anomaly":anomaly,"change_points":changes,"growth_risk":growth,"spatial_neighbor":neighbor,"vulnerability_clustering":vulnerability,"spatiotemporal_risk":spatiotemporal,"time_person_place_risk":tpp,"disease_specific_growth":disease_growth,"signal_prioritization":continuous},
+            "architecture": {"primary_engine_count":5,"supporting_signal_modules":9,"loop":"DATA → ANALYSIS → PREDICTION → PRESCRIPTION → NEW DATA → CONTINUOUS LEARNING"}
         }
 
 SIHISIntelligenceEngine=IntelligenceEngine

@@ -1244,4 +1244,4 @@ else:
             if include_ml:render_ml_report(result.get('ml'),sel_disease,label)
             else:st.info('ML layer belum diaktifkan. Centang **Aktifkan ML layer** pada Panel Kontrol untuk menjalankan prediction models.')
     
-st.caption('SI-HIS Intelligence — epidemiological decision-support with TIME + PERSON + PLACE.'\n)
+st.caption('SI-HIS Intelligence — epidemiological decision-support with TIME + PERSON + PLACE.')

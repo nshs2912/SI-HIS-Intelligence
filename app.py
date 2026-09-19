@@ -857,3 +857,143 @@ def render_ml_report(ml, disease=None, label=None):
 
 
 st.caption('SI-HIS Intelligence — epidemiological decision-support with TIME + PERSON + PLACE.')
+st.sidebar.header('⚙️ Panel Kontrol & Filter')
+source_options=get_source_catalog()
+source_labels={item['label']:item['source_id'] for item in source_options}
+source_label=st.sidebar.radio('Sumber Data',['🧪 Data Dummy / Synthetic Nasional','🏥 Data Faktual / Operational Integration'])
+if source_label.startswith('🧪'):
+    source_id='dummy'
+    df_raw,source_metadata=load_source('dummy')
+    uploaded=None
+    st.sidebar.success(f"✅ {len(df_raw):,} data sintetis dimuat.")
+    st.sidebar.caption('Mode presentasi/development. Tidak merepresentasikan pasien nyata.')
+else:
+    factual_choices=[item for item in source_options if item['category']=='factual']
+    factual_labels=[item['label'] for item in factual_choices]
+    selected_factual=st.sidebar.selectbox('Jenis Sumber Faktual',factual_labels)
+    source_id=source_labels[selected_factual]
+    st.sidebar.caption('Prototype transport: upload CSV/Excel. Saat operasional, adapter sumber dapat diganti API/database/FHIR tanpa mengubah intelligence engine.')
+    uploaded=st.sidebar.file_uploader('Upload Data Faktual',type=['xlsx','csv'])
+    if uploaded is None:
+        st.info('Pilih jenis sumber faktual lalu upload CSV/Excel untuk simulasi integrasi. Pada tahap operasional, bagian ini digantikan connector/adaptor sumber.')
+        st.stop()
+    try:
+        df_raw,source_metadata=load_source(source_id,factual_file=uploaded)
+    except Exception as exc:
+        st.error(f'Error membaca data faktual: {exc}')
+        st.stop()
+    missing=source_metadata.get('missing_canonical_columns',[])
+    if missing:
+        st.error(f'Kolom canonical SI-HIS belum lengkap: {missing}')
+        st.info('Gunakan Template_Data_Surveilans.xlsx atau mapping adapter sumber. Field yang belum tersedia dapat dipetakan oleh tim IT pada ingestion layer.')
+        st.stop()
+    st.sidebar.success(f"✅ {len(df_raw):,} data faktual dimuat dari {selected_factual}.")
+    st.sidebar.caption('Sumber tercatat sebagai FACTUAL; provenance source_id disimpan pada metadata runtime.')
+try:st.sidebar.download_button('📥 Download Template Excel Standard',generate_excel_template(),'Template_Data_Surveilans.xlsx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',use_container_width=True)
+except Exception:pass
+st.sidebar.markdown('---');st.sidebar.subheader('📍 Filter Analisis Epidemiologi');provinces=sorted(df_raw['Provinsi'].dropna().astype(str).unique()) if 'Provinsi' in df_raw else [];sel_prov=st.sidebar.selectbox('1. Provinsi',['Semua Provinsi']+provinces);dfp=df_raw if sel_prov=='Semua Provinsi' else df_raw[df_raw['Provinsi'].astype(str).eq(sel_prov)];districts=sorted(dfp['Kabupaten'].dropna().astype(str).unique()) if 'Kabupaten' in dfp else [];sel_kab=st.sidebar.selectbox('2. Kabupaten/Kota',['Semua Kabupaten/Kota']+districts);dfk=dfp if sel_kab=='Semua Kabupaten/Kota' else dfp[dfp['Kabupaten'].astype(str).eq(sel_kab)];disease_values=set()
+for col in ['Diagnosis Konfirm','Diagnosis Probabel','Diagnosis Suspek']:
+    if col in df_raw:disease_values.update(str(x).strip() for x in df_raw[col].dropna().unique() if str(x).strip().lower() not in {'','nan','bukan','none','tidak ada','-'})
+sel_disease=st.sidebar.selectbox('3. Diagnosis Penyakit',['Semua Penyakit']+sorted(disease_values))
+with st.sidebar.expander('Drill-down wilayah (opsional)'):
+    kecs=sorted(dfk['Kecamatan'].dropna().astype(str).unique()) if 'Kecamatan' in dfk else [];sel_kec=st.selectbox('Kecamatan',['Semua Kecamatan']+kecs);dbase=dfk if sel_kec=='Semua Kecamatan' else dfk[dfk['Kecamatan'].astype(str).eq(sel_kec)];villages=sorted(dbase['Desa/Kelurahan'].dropna().astype(str).unique()) if 'Desa/Kelurahan' in dbase else [];sel_desa=st.selectbox('Desa/Kelurahan',['Semua Desa/Kelurahan']+villages);vbase=dbase if sel_desa=='Semua Desa/Kelurahan' else dbase[dbase['Desa/Kelurahan'].astype(str).eq(sel_desa)];pusk=sorted(vbase['Puskesmas'].dropna().astype(str).unique()) if 'Puskesmas' in vbase else [];sel_pusk=st.selectbox('Puskesmas',['Semua Puskesmas']+pusk)
+include_ml=st.sidebar.checkbox('Aktifkan ML layer',False);scope=QueryScope(province=None if sel_prov=='Semua Provinsi' else sel_prov,district=None if sel_kab=='Semua Kabupaten/Kota' else sel_kab,kecamatan=None if sel_kec=='Semua Kecamatan' else sel_kec,village=None if sel_desa=='Semua Desa/Kelurahan' else sel_desa,puskesmas=None if sel_pusk=='Semua Puskesmas' else sel_pusk,disease=None if sel_disease=='Semua Penyakit' else sel_disease,period_days=3650)
+if sel_disease=='Semua Penyakit':
+    result=engine.descriptive(dfk);label=sel_kab if sel_kab!='Semua Kabupaten/Kota' else (sel_prov if sel_prov!='Semua Provinsi' else 'Indonesia');st.markdown(f'## 📊 Analisis Deskriptif — {label}');ov=result['overview'];a,b=st.columns(2);a.metric('Total Kunjungan Pasien',f"{ov['total_cases']:,}");b.metric('Kasus Meninggal',f"{ov['deaths']:,}");st.markdown('### Resume Epidemiologi');show_resume(descriptive_expert(result,label));st.markdown('### 🏆 10 Besar Penyakit');show_resume('Tabel ini menunjukkan penyakit dengan beban kasus terbesar dalam scope yang dipilih. Jumlah kasus menggambarkan beban absolut; CFR menggambarkan proporsi kematian di antara kasus dan tidak boleh ditafsirkan sebagai mortality rate populasi tanpa denominator yang sesuai.');render_value(result['top10_diseases']);st.markdown('### Distribusi');show_resume('Distribusi berikut memperlihatkan komposisi kasus menurut penyakit, jenis kelamin, kelompok umur, provinsi, dan kabupaten/kota. Perbedaan jumlah kasus adalah temuan deskriptif dan tidak otomatis menunjukkan perbedaan risiko.');render_value(result['disease_distribution']);render_value(result['sex_distribution'],'Jenis Kelamin');render_value(result['age_distribution'],'Kelompok Umur');render_value(result['province_distribution'],'Provinsi');render_value(result['district_distribution'].head(50),'Kabupaten/Kota')
+else:
+    result=engine.analyze(df_raw,scope=scope,include_ml=include_ml,mode='epidemiology');label=sel_kab if sel_kab!='Semua Kabupaten/Kota' else (sel_prov if sel_prov!='Semua Provinsi' else 'Indonesia');st.markdown(f'## 🧬 Analisis Epidemiologi — {sel_disease}');st.caption(f'Scope: **{sel_disease} — {label}** | TIME + PERSON + PLACE')
+    if not result.get('eligible',False):st.warning('Analisis epidemiologi belum dapat dijalankan.');render_value(result.get('eligibility'));st.stop()
+    total=int(result['overview']['total_cases']);mortality=result.get('mortality');deaths=int(mortality.get('deaths',mortality.get('meninggal',0)) or 0) if isinstance(mortality,dict) else 0;cfr=deaths/total*100 if total else 0;a,b,c=st.columns(3);a.metric(f'Total {sel_disease}',f'{total:,}');b.metric('Meninggal',f'{deaths:,}');c.metric('CFR — tingkat kematian akibat penyakit',f'{cfr:.2f}%')
+    # Navigation Bar utama tetap horizontal di atas. Setiap tab memiliki resume sendiri tepat di bawah tab.
+    tabs=st.tabs(['🚨 AI Prediction & Recommendation','📊 Trias Epidemiologi (Detail)','📈 Kurva Epidemik & Prediksi','🗺️ Peta Spasial & AI DBSCAN','🧪 Analisis Faktor Risiko','🤖 Analisis ML'])
+    with tabs[0]:
+        st.markdown('### 🚨 AI Prediction & Recommendation')
+        resume_text=ai_prediction_expert(result,sel_disease,label)
+        analyzed_df=result.get('analysis_dataframe')
+        if not isinstance(analyzed_df,pd.DataFrame) or analyzed_df.empty:
+            analyzed_df=df_raw.copy()
+        export_meta=build_export_metadata(analyzed_df,sel_disease,label,source_metadata.get('source_id','unknown') if source_metadata.get('source_mode')=='FACTUAL' else 'DEMO-SYNTHETIC',sel_prov,sel_kab,sel_kec,sel_desa,sel_pusk)
+        pdf_bytes=build_resume_pdf(f'SI-HIS Resume Epidemiologi — {sel_disease}',resume_text,export_meta)
+        xlsx_bytes=build_evaluation_excel(analyzed_df,export_meta)
+        csv_bytes=build_evaluation_csv(analyzed_df)
+        st.markdown('#### 📥 Paket Verifikasi & Konfirmasi')
+        st.caption('PDF adalah hardcopy resume analisis. Datasheet adalah baris data yang benar-benar dianalisis pada scope ini, sehingga tim Kemenkes/Dinkes dapat melakukan verifikasi dan konfirmasi langsung tanpa meminta ulang datasheet ke Dinkes sumber.')
+        c1,c2,c3=st.columns(3)
+        c1.download_button('📄 Download Resume PDF',pdf_bytes,f'SI-HIS_Resume_{sel_disease}_{label}.pdf','application/pdf',use_container_width=True)
+        c2.download_button('📊 Download Datasheet Excel',xlsx_bytes,f'SI-HIS_Datasheet_Verifikasi_{sel_disease}_{label}.xlsx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',use_container_width=True)
+        c3.download_button('📋 Download Datasheet CSV',csv_bytes,f'SI-HIS_Datasheet_Verifikasi_{sel_disease}_{label}.csv','text/csv',use_container_width=True)
+        st.info(f"🔐 **SHA-256 datasheet:** `{export_meta['SHA-256 Datasheet']}` — gunakan nilai ini untuk memastikan datasheet yang diverifikasi identik dengan data yang dianalisis.")
+        show_tab_resume('Resume AI Prediction & Recommendation',resume_text,'alert, EWS, prediction, scoring dan rekomendasi di bawah')
+        klb=result.get('klb',{})
+        if isinstance(klb,dict):
+            status=klb.get('status',klb.get('level',klb.get('classification','')))
+            if status:
+                s=str(status).upper()
+                if 'ALERT' in s or 'INVESTIGATION' in s or 'KLB' in s: st.error(f'🔴 **ALERT SURVEILANS: {status}**')
+                elif 'WARNING' in s: st.warning(f'🟡 **EARLY WARNING: {status}**')
+                else: st.info(f'**Status surveilans:** {status}')
+        render_value(result.get('ews'),'Indikator EWS');render_value(result.get('rt'),'Rₜ')
+        st.markdown('### Rekomendasi AI untuk investigasi dan pencegahan')
+        rec=result.get('recommendations',result.get('recommendation'))
+        if rec: render_value(rec)
+        else: show_resume('SI-HIS mengarahkan tindakan berdasarkan sinyal yang terdeteksi: penyelidikan epidemiologi, penemuan kasus aktif, penelusuran kontak, analisis TIME + PERSON + PLACE, analisis cluster/episentrum, serta pengendalian faktor risiko sesuai penyakit dan temuan lapangan.')
+    with tabs[1]:
+        st.markdown('### 📊 Trias Epidemiologi (Detail)')
+        show_tab_resume('Resume TIME + PERSON + PLACE + OUTCOME',epidemiology_expert(result,label,sel_disease),'tabel/grafik Trias dan scoring di bawah')
+        if isinstance(result.get('priority_score'),pd.DataFrame):
+            st.markdown('#### 🎯 Prioritas Epidemiologis — Burden Score & CFR Score')
+            st.dataframe(result['priority_score'],use_container_width=True,hide_index=True)
+            render_scoring_explanation()
+        tri=result.get('trias_summary',{})
+        top10=tri.get('top10_province') if isinstance(tri,dict) else None
+        if isinstance(top10,pd.DataFrame) and not top10.empty:render_value(top10,'10 Besar Wilayah')
+        render_value(result.get('place'),'PLACE');render_value(result.get('person'),'PERSON')
+        t=result.get('time')
+        if isinstance(t,pd.DataFrame) and not t.empty:
+            chart=t.copy();chart['Tanggal Sakit']=pd.to_datetime(chart['Tanggal Sakit'],errors='coerce');valid_chart=chart.dropna(subset=['Tanggal Sakit'])
+            if not valid_chart.empty:st.line_chart(valid_chart.set_index('Tanggal Sakit')['Jumlah Kasus'])
+            render_value(t,'TIME')
+        show_resume('Distribusi mortalitas dan CFR menjelaskan beban kematian relatif terhadap jumlah kasus. CFR adalah proporsi kasus penyakit yang meninggal akibat penyakit tersebut; mortality rate menggunakan populasi sebagai denominator.')
+        render_value(mortality,'MORTALITY / CFR');show_resume(vulnerable_expert(result.get('vulnerable')),'tabel profil kerentanan di bawah')\n        render_value(result.get('vulnerable'),'Vulnerable Population')
+    with tabs[2]:
+        st.markdown('### 📈 Kurva Epidemik & Prediksi')
+        show_tab_resume('Resume Kurva Epidemik & Prediksi',curve_expert(result,sel_disease),'kurva, gelombang, forecast dan Rₜ di bawah')
+        t=result.get('time')
+        if isinstance(t,pd.DataFrame) and not t.empty:
+            chart=t.copy();chart['Tanggal Sakit']=pd.to_datetime(chart['Tanggal Sakit'],errors='coerce');valid_chart=chart.dropna(subset=['Tanggal Sakit'])
+            if not valid_chart.empty:st.line_chart(valid_chart.set_index('Tanggal Sakit')['Jumlah Kasus'])
+        st.markdown('### Forecast 14 Hari');forecast_render(result.get('forecast'));waves=result.get('waves')
+        if waves:render_value(waves,'Gelombang Temporal')
+    with tabs[3]:
+        st.markdown('### 🗺️ Peta Spasial & AI DBSCAN')
+        spatial=result.get('spatial')
+        show_tab_resume('Resume Spatial Epidemiology',spatial_expert(spatial,sel_disease),'peta, cluster dan episentrum di bawah')
+        st.caption('Analisis spasial, cluster dan episentrum digunakan untuk memperkuat interpretasi PLACE pada resume epidemiologi.');
+        render_value(spatial,'Hasil DBSCAN')
+        if isinstance(spatial,pd.DataFrame) and not spatial.empty and {'Latitude','Longitude'}.issubset(spatial.columns):
+            geo=spatial.dropna(subset=['Latitude','Longitude'])
+            if not geo.empty:
+                m=folium.Map(location=[float(geo.Latitude.mean()),float(geo.Longitude.mean())],zoom_start=9)
+                for _,row in geo.head(500).iterrows():folium.CircleMarker([float(row.Latitude),float(row.Longitude)],radius=4,popup=f"{row.get('Desa/Kelurahan','')} | Cluster {row.get('Cluster','')}").add_to(m)
+                st_folium(m,width=None,height=500)
+        render_value(result.get('epicenters'),'Episentrum / Titik Prioritas')
+        st.caption('Cluster adalah hasil kepadatan spasial. Episentrum adalah lokasi konsentrasi prioritas dalam dataset; keduanya bukan otomatis sumber penularan dan harus dikaitkan dengan TIME, hubungan epidemiologis dan investigasi lapangan.')
+    with tabs[4]:
+        st.markdown('### 🧪 Analisis Faktor Risiko')
+        show_tab_resume('Resume Analisis Faktor Risiko',risk_expert(result),'tabel bivariat, multivariat dan outcome di bawah')
+        st.markdown('#### Detail Analisis Faktor Risiko')
+        s=risk_summary(result.get('risk_factors'))
+        if not s.empty:st.dataframe(s,use_container_width=True,hide_index=True)
+        outcomes=result.get('outcome_analyses',{})
+        if isinstance(outcomes,dict):
+            for outcome_name,outcome in outcomes.items():
+                with st.expander(f'Outcome: {outcome_name}',expanded=(outcome_name=='Penyakit')):render_value(outcome)
+        render_risk_factors(result.get('risk_factors'))
+    with tabs[5]:
+        st.markdown('### 🤖 Analisis ML')
+        show_tab_resume('Resume Machine Learning',ml_expert(result.get('ml')),'performa model, feature importance dan hasil ML di bawah')
+        st.caption('Analisis ML mendukung decision support dan melengkapi analisis epidemiologi, bukan menggantikannya.')
+        if include_ml:render_ml_report(result.get('ml'))
+        else:st.info('ML layer belum diaktifkan. Centang **Aktifkan ML layer** pada Panel Kontrol untuk menjalankan prediction models.')
+
+st.caption('SI-HIS Intelligence — epidemiological decision-support with TIME + PERSON + PLACE.')

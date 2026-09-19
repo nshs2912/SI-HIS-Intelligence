@@ -1115,7 +1115,12 @@ else:
         st.markdown('### 🤖 Analisis ML')
         orch=result.get('intelligence_orchestration',{})
         incident=result.get('incident_reasoning_v2',{})
-        if isinstance(incident,dict):
+        disease_profile=result.get('disease_intelligence',{}) if isinstance(result.get('disease_intelligence',{}),dict) else {}
+        disease_context_known=(
+            str(disease_profile.get('family','')).upper() in {'MENULAR','PTM'}
+            and str(disease_profile.get('transmission','')).lower() not in {'','unknown','mixed'}
+        )
+        if isinstance(incident,dict) and not disease_context_known:
             st.markdown('### 🚨 Incident & Outbreak Reasoning v2')
             st.caption('Menggabungkan temporal burst, spatio-temporal cluster, sindrom gejala, attack rate, facility surge, severity/mortality burst, exposure, dan corroboration lingkungan. Skor adalah triage internal.')
             ic1,ic2,ic3=st.columns(3)

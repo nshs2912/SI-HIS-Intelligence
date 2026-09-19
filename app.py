@@ -1113,7 +1113,27 @@ else:
         render_risk_factors(result.get('risk_factors'))
     with tabs[5]:
         st.markdown('### 🤖 Analisis ML')
-        show_tab_resume('Resume Machine Learning',ml_expert(result.get('ml')),'performa model, feature importance dan hasil ML di bawah')
+        orch=result.get('intelligence_orchestration',{})
+        if isinstance(orch,dict):
+            st.markdown('### 🧠 SI-HIS Intelligence Orchestrator')
+            st.caption('Lapisan orkestrasi menggabungkan sinyal temporal, spasial, unit terkecil, acute-event, disease context, uncertainty, dan hasil ML. Ini adalah triage intelligence, bukan diagnosis atau penetapan KLB/bencana.')
+            oc1,oc2,oc3=st.columns(3)
+            oc1.metric('Status Intelligence',str(orch.get('status','-')))
+            oc2.metric('Prioritas',str(orch.get('priority','-')))
+            ev=orch.get('evidence_fusion',{}) if isinstance(orch.get('evidence_fusion'),dict) else {}
+            unc=ev.get('uncertainty',{}) if isinstance(ev.get('uncertainty'),dict) else {}
+            oc3.metric('Confidence Evidence',str(unc.get('confidence','-'))+' ('+str(unc.get('score','-'))+')')
+            active=ev.get('active_signals',[])
+            if active: st.warning('Sinyal aktif: '+', '.join(map(str,active)))
+            finest=ev.get('finest_unit',{}) if isinstance(ev.get('finest_unit'),dict) else {}
+            top=finest.get('highest_signal_unit',{}) if isinstance(finest.get('highest_signal_unit'),dict) else {}
+            if top: st.info('📍 Unit prioritas terkecil: **'+str(top.get('Unit','-'))+'** | Level: **'+str(top.get('Level','-'))+'** | Kasus: **'+str(top.get('Kasus','-'))+'** | Kepadatan: **'+str(top.get('Kepadatan_per_Jam','-'))+'/jam**')
+            with st.expander('🔎 Evidence Fusion & Unknown Event Detection',expanded=bool(active)):
+                render_value(ev.get('multi_window'),'Multi-Window Scan')
+                render_value(ev.get('unknown_event'),'Unknown Event Detection')
+                render_value(ev.get('uncertainty'),'Uncertainty Intelligence')
+                render_value(orch.get('next_actions'),'Next Actions')
+        show_tab_resume('Resume Machine Learning',ml_expert(result.get('ml'),sel_disease,label),'performa model, feature importance dan hasil ML di bawah')
         st.caption('Analisis ML mendukung decision support dan melengkapi analisis epidemiologi, bukan menggantikannya.')
         if include_ml:render_ml_report(result.get('ml'),sel_disease,label)
         else:st.info('ML layer belum diaktifkan. Centang **Aktifkan ML layer** pada Panel Kontrol untuk menjalankan prediction models.')

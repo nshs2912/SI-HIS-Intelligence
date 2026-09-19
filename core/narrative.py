@@ -350,29 +350,64 @@ def risk_expert(result):
     return "\n".join(lines)
 
 
+
 def ml_expert(ml, disease=None, label=None):
-    """Expert ML narrative: always scoped to the selected disease and analysis geography."""
-    disease_name=disease or "penyakit terpilih"
-    scope_name=label or "scope analisis"
-    if not isinstance(ml,dict) or not ml:
-        return f"### 🤖 RESUME MACHINE LEARNING — {disease_name}\\n\\nML layer belum dijalankan untuk **{disease_name}** pada **{scope_name}**."
-    primary=ml.get("primary_engines",{})
-    ci=ml.get("continuous_intelligence",{})
-    lines=[
+    """Expert ML narrative: epidemiological ML as a capability layer over 5 primary engines."""
+    disease_name = disease or "penyakit terpilih"
+    scope_name = label or "scope analisis"
+    if not isinstance(ml, dict) or not ml:
+        return (
+            f"### 🤖 RESUME MACHINE LEARNING & EPIDEMIOLOGICAL AI — {disease_name}\n\n"
+            f"ML layer belum dijalankan untuk **{disease_name}** pada **{scope_name}**."
+        )
+
+    primary = ml.get("primary_engines", {})
+    supporting = ml.get("continuous_intelligence", {})
+
+    lines = [
         f"### 🤖 RESUME MACHINE LEARNING & EPIDEMIOLOGICAL AI — {disease_name}",
         "",
-        f"**Scope:** {scope_name}. Seluruh model dan supporting signal pada menu ini ditujukan khusus untuk **{disease_name}**. Saat filter penyakit berubah, hasil tidak boleh dibawa dari penyakit sebelumnya; kohort, target outcome, distribusi kelas, pola waktu, pola tempat, metrik, dan interpretasi harus dibaca ulang.",
-        f"SI-HIS menggabungkan **{len(primary) if isinstance(primary,dict) else 0} primary engine** dan **{len(ci) if isinstance(ci,dict) else 0} supporting intelligence module** untuk memperkuat surveillance dan decision support.",
+        "### 🧬 Apa yang Dilakukan ML Epidemiologi?",
+        "",
+        "ML Epidemiologi pada SI-HIS merupakan lapisan kecerdasan analitik yang menggunakan machine learning dan epidemiological intelligence untuk mengolah data surveillance menjadi **sinyal, prediksi, stratifikasi risiko, dan prioritas investigasi**.",
+        "",
+        "ML Epidemiologi menganalisis pola **TIME + PERSON + PLACE** serta karakteristik penyakit terpilih untuk membantu menjawab pertanyaan epidemiologis utama:",
+        "",
+        "- **Apa yang sedang berubah?** — mendeteksi anomali, perubahan tren, dan perubahan pola epidemiologi.",
+        "- **Di mana perubahan terjadi?** — mengidentifikasi konsentrasi dan pola risiko spasial.",
+        "- **Siapa yang perlu diperhatikan?** — mengidentifikasi kelompok atau populasi dengan karakteristik risiko tertentu.",
+        "- **Seberapa serius sinyal tersebut?** — memperkirakan severity atau outcome target pada kasus yang dianalisis.",
+        "- **Apakah beban penyakit berpotensi meningkat?** — memprediksi pertumbuhan atau peningkatan kasus.",
+        "- **Apa yang mungkin terjadi berikutnya?** — melakukan forecasting berdasarkan pola temporal historis.",
+        "- **Wilayah mana yang perlu diverifikasi lebih dahulu?** — melakukan prioritisasi surveillance dan investigasi.",
+        "- **Sinyal mana yang memerlukan perhatian lebih lanjut?** — menggabungkan berbagai indikator menjadi epidemiological risk signal.",
+        "",
+        "### 🧠 Struktur ML Epidemiologi SI-HIS",
+        "",
+        f"ML Epidemiologi terdiri dari **5 Primary ML Engine** dan **{len(supporting) if isinstance(supporting, dict) else 9} Supporting Intelligence Module**. Kelima primary engine menghasilkan prediksi pada aspek yang berbeda, sedangkan supporting intelligence membantu menemukan perubahan, pola, dan sinyal epidemiologis yang memerlukan verifikasi lebih lanjut.",
+        "",
+        "**5 Primary ML Engine:**",
+        "1. **Case Severity Prediction**",
+        "2. **Outbreak/KLB 7-Day Prediction**",
+        "3. **Spatial Outbreak Prediction**",
+        "4. **Vulnerable Population Prediction**",
+        "5. **Temporal Forecasting**",
+        "",
+        f"**Scope:** {scope_name}. Seluruh model dan supporting signal pada menu ini ditujukan khusus untuk **{disease_name}**. Saat filter penyakit berubah, kohort, target outcome, distribusi kelas, pola waktu, pola tempat, metrik, dan interpretasi harus dibaca ulang.",
+        f"SI-HIS saat ini menjalankan **{len(primary) if isinstance(primary, dict) else 5} primary engine** dan supporting intelligence untuk memperkuat surveillance dan decision support.",
+        "",
     ]
-    items=[
+
+    items = [
         ("Case Severity", "memperkirakan probabilitas outcome severity yang didefinisikan sistem pada kasus penyakit terpilih", "prioritas pemantauan"),
         ("Outbreak/KLB 7 Hari", "mencari sinyal peningkatan beban kasus dalam 7 hari berikutnya", "prioritas verifikasi wilayah"),
         ("Spatial Outbreak", "menggabungkan dimensi waktu dan lokasi untuk mencari area yang perlu diverifikasi lebih dini", "prioritas investigasi spasial"),
         ("Vulnerable Population", "mencari pola karakteristik person yang berkaitan dengan outcome target", "prioritas kelompok surveillance"),
-        ("Forecasting", "memproyeksikan beban kasus berdasarkan pola waktu historis", "kesiapsiagaan dan kapasitas")
+        ("Forecasting", "memproyeksikan beban kasus berdasarkan pola waktu historis", "kesiapsiagaan dan kapasitas"),
     ]
-    for title,purpose,use in items:
+    for title, purpose, use in items:
         lines.append(f"**{title}:** Untuk **{disease_name}**, model {purpose}. Keluaran digunakan sebagai **{use}**, bukan diagnosis atau keputusan otomatis.")
+
     lines += [
         "",
         "### 📖 Bahasa sederhana untuk metrik classifier",
@@ -385,15 +420,15 @@ def ml_expert(ml, disease=None, label=None):
         f"Kinerja model harus dibaca pada populasi dan periode uji yang digunakan. Nilai yang baik pada satu penyakit atau wilayah tidak otomatis berlaku pada penyakit/wilayah lain. Untuk **{disease_name}**, validasi eksternal dan monitoring drift tetap diperlukan sebelum penggunaan operasional.",
         "",
         "### 👥 Untuk praktisi/pengambil keputusan",
-        f"Gunakan ML {disease_name} bersama TIME + PERSON + PLACE, kurva epidemik, Rₜ, EWS, outcome, analisis spasial, dan investigasi lapangan. ML membantu menentukan **di mana dan apa yang perlu diperiksa lebih dahulu**; otoritas manusia menentukan tindakan.",
+        f"Gunakan ML **{disease_name}** bersama TIME + PERSON + PLACE, kurva epidemik, Rₜ, EWS, outcome, analisis spasial, dan investigasi lapangan. ML membantu menentukan **di mana dan apa yang perlu diperiksa lebih dahulu**; otoritas manusia menentukan tindakan.",
         "",
         "### ⚠️ Batasan penting",
         "Outcome target harus memiliki definisi dan label yang valid. Data leakage, missingness, class imbalance, reporting delay, perubahan case definition, calibration drift, dan perubahan pola epidemiologi dapat mengubah performa model. Status ERROR berarti evaluasi belum valid, bukan performa model nol.",
         "",
         "### 🔄 Prinsip continuous intelligence",
-        "DATA → ANALYSIS → PREDICTION → RECOMMENDATION → INTERVENTION → OUTCOME → NEW DATA → RE-ANALYSIS → CONTINUOUS LEARNING"
+        "DATA → ANALYSIS → PREDICTION → RECOMMENDATION → INTERVENTION → OUTCOME → NEW DATA → RE-ANALYSIS → CONTINUOUS LEARNING",
     ]
-    return "\\n".join(lines)
+    return "\n".join(lines)
 
 def ai_prediction_expert(result, disease, label):
     df = result.get("analysis_dataframe") if isinstance(result,dict) else None

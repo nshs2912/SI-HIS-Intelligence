@@ -5,7 +5,7 @@ Derived targets are explicitly demo labels unless a validated outcome is supplie
 import numpy as np
 import pandas as pd
 from sklearn.compose import ColumnTransformer
-from sklearn.ensemble import RandomForestClassifier
+from sklearn.ensemble import RandomForestClassifier, IsolationForest
 from sklearn.impute import SimpleImputer
 from sklearn.inspection import permutation_importance
 from sklearn.linear_model import LogisticRegression
@@ -182,6 +182,118 @@ def robust_forecast(df,forecast_days=14):
                "Gunakan bersama kurva epidemik, Rₜ, EWS, dan konteks intervensi sebelum keputusan operasional.")
     return {'status':'ok','forecast':np.maximum(f,0),'dates':dates,'lower':np.maximum(f-1.96*s,0),'upper':f+1.96*s,'peak_date':dates[int(np.argmax(f))],'peak_value':float(np.max(f)),'mae':float(valid[best]),'rmse':float(np.sqrt(np.mean((test-candidates[best])**2))) if len(test) else np.nan,'models':list(preds),'weights':weights,'backtest_mae':valid,'narrative':narrative}
 
+
+
+# ---------------------------------------------------------------------------
+# Continuous epidemiological intelligence signals
+# These are supporting ML/AI modules around the five primary SI-HIS engines.
+# They do not create a sixth clinical decision engine; they enrich the
+# continuous DATA -> ANALYSIS -> PREDICTION -> PRESCRIPTION -> NEW DATA loop.
+# ---------------------------------------------------------------------------
+
+def temporal_anomaly_detection(df, contamination=0.05):
+    """Detect unusual daily village burden using Isolation Forest."""
+    p=_daily_panel(df)
+    if p.empty:return {'status':'error','message':'Panel temporal per desa belum tersedia.','data':pd.DataFrame()}
+    x=p[['Daily_Cases','Rolling7','Growth7']].replace([np.inf,-np.inf],np.nan).dropna()
+    if len(x)<30 or x.nunique().sum()<2:return {'status':'error','message':'Observasi temporal belum cukup untuk anomaly detection.','data':pd.DataFrame()}
+    model=IsolationForest(n_estimators=250,contamination=contamination,random_state=RANDOM_STATE)
+    model.fit(x)
+    p2=p.loc[x.index].copy(); p2['Anomaly_Score']=(-model.score_samples(x)).astype(float); p2['Anomaly_Flag']=(model.predict(x)==-1)
+    return {'status':'ok','data':p2.sort_values('Anomaly_Score',ascending=False),'n_anomalies':int(p2['Anomaly_Flag'].sum()),'method':'Isolation Forest'}
+
+
+def temporal_change_points(df, window=7, z_threshold=2.0):
+    """Transparent change-point signal from rolling mean shift."""
+    p=_daily_panel(df)
+    if p.empty:return {'status':'error','message':'Panel temporal belum tersedia.','data':pd.DataFrame()}
+    rows=[]
+    for village,g in p.groupby('Desa/Kelurahan',sort=False):
+        g=g.sort_values('Tanggal Sakit').copy(); s=g['Daily_Cases'].astype(float)
+        before=s.shift(1).rolling(window,min_periods=window).mean(); after=s.rolling(window,min_periods=window).mean()
+        sd=s.shift(1).rolling(window,min_periods=window).std().replace(0,np.nan)
+        g['Change_Score']=((after-before).abs()/sd).replace([np.inf,-np.inf],np.nan).fillna(0)
+        g['Change_Point_Flag']=g['Change_Score']>=z_threshold; rows.append(g)
+    out=pd.concat(rows,ignore_index=True) if rows else pd.DataFrame()
+    return {'status':'ok','data':out.sort_values('Change_Score',ascending=False),'n_change_points':int(out['Change_Point_Flag'].sum()),'method':'Rolling mean shift'}
+
+
+def growth_risk_prediction(df):
+    """Rank current growth/acceleration signals for each village."""
+    p=_latest_village_features(df)
+    if p.empty:return {'status':'error','message':'Fitur pertumbuhan per desa belum tersedia.','data':pd.DataFrame()}
+    q=p.copy(); q['Growth_Risk_Score']=(q['Growth7'].clip(lower=-1,upper=3).fillna(0).add(1).clip(lower=0)/4*100).round(2)
+    q['Acceleration_Signal']=(q['Rolling7'].fillna(0)-q['Lag7'].fillna(0)).round(2)
+    q['Growth_Risk_Level']=pd.cut(q['Growth_Risk_Score'],[-.01,33,66,100.01],labels=['LOW','MEDIUM','HIGH']).astype(str)
+    return {'status':'ok','data':q.sort_values(['Growth_Risk_Score','Acceleration_Signal'],ascending=False),'method':'Growth + acceleration signal'}
+
+
+def spatial_neighbor_intelligence(df, radius_km=20):
+    """Calculate geographically proximate case burden without claiming causality."""
+    p=_latest_village_features(df,True)
+    if p.empty or not {'Lat','Lon'}.issubset(p.columns):return {'status':'error','message':'Koordinat desa belum tersedia.','data':pd.DataFrame()}
+    coords=p[['Lat','Lon']].to_numpy(float); daily=p['Daily_Cases'].to_numpy(float); neigh=[]
+    for i,(lat,lon) in enumerate(coords):
+        if not np.isfinite(lat) or not np.isfinite(lon):neigh.append(0.0);continue
+        dist=111.2*np.sqrt(((coords[:,0]-lat)*np.cos(np.radians(lat)))**2+(coords[:,1]-lon)**2)
+        mask=(dist<=radius_km)&np.isfinite(dist); neigh.append(float(daily[mask].sum()-daily[i]))
+    p['Neighbor_Cases']=neigh; p['Neighbor_Risk_Score']=(100*p['Neighbor_Cases']/max(float(max(p['Neighbor_Cases'].max(),1)),1)).round(2)
+    return {'status':'ok','data':p.sort_values('Neighbor_Risk_Score',ascending=False),'radius_km':radius_km,'method':'Geo-distance neighbor burden'}
+
+
+def vulnerability_clustering(df):
+    """Unsupervised clustering of person-level vulnerability profiles."""
+    d=df.copy(); cols=[c for c in ['Umur','Status Komorbid','Status Imunisasi','Pekerjaan','Merokok','Aktivitas Fisik'] if c in d.columns]
+    if len(d)<30 or 'Umur' not in d.columns:return {'status':'error','message':'Data person belum cukup untuk vulnerability clustering.','data':pd.DataFrame()}
+    # Keep the prototype explainable: age + encoded categorical burden counts.
+    x=pd.DataFrame(index=d.index); x['Umur']=pd.to_numeric(d['Umur'],errors='coerce').fillna(pd.to_numeric(d['Umur'],errors='coerce').median())
+    for c in cols:
+        if c=='Umur':continue
+        x[c+'_Yes']=d[c].astype(str).str.lower().isin(['ya','yes','positif','ada','berisiko','tinggi']).astype(int)
+    from sklearn.cluster import KMeans
+    n_clusters=2 if len(x)>=60 else 2
+    model=KMeans(n_clusters=n_clusters,n_init=10,random_state=RANDOM_STATE)
+    labels=model.fit_predict(x); out=d.copy(); out['Vulnerability_Cluster']=labels
+    profile=out.groupby('Vulnerability_Cluster').size().rename('Cases').reset_index()
+    return {'status':'ok','data':out,'cluster_profile':profile,'method':'KMeans vulnerability profile'}
+
+
+def prioritize_continuous_signals(anomaly=None,change_points=None,growth=None,neighbor=None):
+    """Fuse transparent surveillance signals into an operational queue."""
+    frames=[]
+    if isinstance(anomaly,dict) and isinstance(anomaly.get('data'),pd.DataFrame) and not anomaly['data'].empty:
+        a=anomaly['data'][['Desa/Kelurahan','Tanggal Sakit','Anomaly_Score']].copy();a['Anomaly']=a['Anomaly_Score'];frames.append(a)
+    if isinstance(change_points,dict) and isinstance(change_points.get('data'),pd.DataFrame) and not change_points['data'].empty:
+        x=change_points['data'][['Desa/Kelurahan','Tanggal Sakit','Change_Score']].copy();frames.append(x)
+    if isinstance(growth,dict) and isinstance(growth.get('data'),pd.DataFrame) and not growth['data'].empty:
+        x=growth['data'][['Desa/Kelurahan','Tanggal Sakit','Growth_Risk_Score']].copy();frames.append(x)
+    if not frames:return {'status':'error','message':'Belum ada sinyal yang dapat digabungkan.','data':pd.DataFrame()}
+    base=frames[0].copy()
+    for x in frames[1:]:base=base.merge(x,on=['Desa/Kelurahan','Tanggal Sakit'],how='outer')
+    for c in ['Anomaly','Change_Score','Growth_Risk_Score']:
+        if c not in base:base[c]=0.0
+        mx=float(pd.to_numeric(base[c],errors='coerce').replace([np.inf,-np.inf],np.nan).max() or 0);base[c+'_Norm']=np.where(mx>0,pd.to_numeric(base[c],errors='coerce').fillna(0)/mx*100,0)
+    base['Priority_Score']=(0.35*base['Anomaly_Norm']+0.30*base['Change_Score_Norm']+0.35*base['Growth_Risk_Score_Norm']).round(2)
+    base['Priority_Level']=pd.cut(base['Priority_Score'],[-.01,33,66,100.01],labels=['LOW','MEDIUM','HIGH']).astype(str)
+    return {'status':'ok','data':base.sort_values('Priority_Score',ascending=False),'method':'Transparent multi-signal prioritization'}
+
+
+def calibration_report(y_true,probabilities,bins=10):
+    y=np.asarray(y_true); p=np.asarray(probabilities,float)
+    if len(y)==0 or len(y)!=len(p):return pd.DataFrame()
+    q=pd.DataFrame({'y':y,'p':p}); q['bin']=pd.qcut(q['p'].rank(method='first'),q=min(bins,len(q)),labels=False,duplicates='drop')
+    return q.groupby('bin',as_index=False).agg(Mean_Predicted=('p','mean'),Observed_Rate=('y','mean'),N=('y','size'))
+
+
+def population_stability_index(reference,current,bins=10):
+    """PSI-style drift indicator for one numeric feature."""
+    r=pd.to_numeric(pd.Series(reference),errors='coerce').dropna(); c=pd.to_numeric(pd.Series(current),errors='coerce').dropna()
+    if len(r)<20 or len(c)<20:return np.nan
+    cuts=np.unique(np.quantile(r,np.linspace(0,1,bins+1)))
+    if len(cuts)<3:return 0.0
+    cuts[0],cuts[-1]=-np.inf,np.inf
+    rp=pd.cut(r,cuts,include_lowest=True).value_counts(normalize=True,sort=False).to_numpy(); cp=pd.cut(c,cuts,include_lowest=True).value_counts(normalize=True,sort=False).to_numpy()
+    rp=np.clip(rp,1e-6,None);cp=np.clip(cp,1e-6,None);return float(np.sum((cp-rp)*np.log(cp/rp)))
 
 def save_model(result,path):
     if result and result.get('status')=='ok':joblib.dump(result['model'],path);return path

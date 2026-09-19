@@ -127,6 +127,31 @@ def render_provider_dashboard(df, provider_type="Rumah Sakit"):
         a,b,c=st.columns(3); a.metric("Rata-rata 7 hari",pred["recent_7d_mean"]); b.metric("Rata-rata 7 hari sebelumnya",pred["previous_7d_mean"]); c.metric("Perubahan 7 hari",f"{pred['growth_7d_pct']:.2f}%")
         st.info(pred["interpretation"]+" Gunakan sebagai sinyal kapasitas, bukan kepastian.")
     else: st.info(pred.get("message","Predictive provider intelligence belum tersedia."))
+    st.markdown("### 6️⃣A Provider-Specific Intelligence")
+    ps=result.get("provider_specific",{})
+    if isinstance(ps,dict) and ps.get("status")=="ok":
+        st.caption("Modul khusus mengikuti karakteristik operasional masing-masing jenis fasyankes; hanya indikator yang tersedia pada dataset yang ditampilkan.")
+        domains=" • ".join(ps.get("domains",[]))
+        if domains: st.info("Domain intelligence: "+domains)
+        if provider_type=="Rumah Sakit":
+            sig=ps.get("capacity_signal",{})
+            a,b=st.columns(2); a.metric("Mean waktu tunggu",str(sig.get("waiting_time_mean","N/A"))); b.metric("Mean lama rawat",str(sig.get("length_of_stay_mean","N/A")))
+            st.caption("Fokus: kapasitas layanan, clinical mix, rawat inap/rujukan, laboratorium, farmasi, mutu dan outcome.")
+        elif provider_type=="Klinik":
+            sig=ps.get("access_signal",{})
+            a,b=st.columns(2); a.metric("Mean waktu tunggu",str(sig.get("waiting_time_mean","N/A"))); b.metric("Baris dengan data rujukan",str(sig.get("referral_rows","N/A")))
+            st.caption("Fokus: akses rawat jalan, clinical mix, tindakan, rujukan, follow-up, laboratorium dan farmasi.")
+        elif provider_type=="Laboratorium":
+            sig=ps.get("laboratory_signal",{})
+            a,b=st.columns(2); a.metric("Mean TAT",str(sig.get("mean_tat","N/A"))); b.metric("Total pemeriksaan/observasi",str(sig.get("tests","N/A")))
+            st.caption("Fokus: volume pemeriksaan, TAT, spesimen, mutu, rujukan dan kebutuhan kapasitas/reagen.")
+        elif provider_type=="Apotek/Farmasi":
+            sig=ps.get("pharmacy_signal",{})
+            a,b=st.columns(2); a.metric("Baris resep/dispensing",str(sig.get("prescription_rows","N/A"))); b.metric("Mean stok",str(sig.get("mean_stock","N/A")))
+            st.caption("Fokus: resep, dispensing, utilisasi obat, stok, potensi stockout/expiry dan refill.")
+    else:
+        st.info("Provider-specific intelligence belum dapat dihitung dari data yang tersedia.")
+
     st.markdown("### 7️⃣ Prescriptive / Decision Support")
     st.markdown("""
 - **Capacity:** evaluasi SDM, jam layanan, bed/ruang, alat dan antrean sesuai pola demand.

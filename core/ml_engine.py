@@ -4,6 +4,7 @@ Derived targets are explicitly demo labels unless a validated outcome is supplie
 """
 import numpy as np
 import pandas as pd
+from sklearn.cluster import KMeans
 from sklearn.compose import ColumnTransformer
 from sklearn.ensemble import RandomForestClassifier, IsolationForest
 from sklearn.impute import SimpleImputer

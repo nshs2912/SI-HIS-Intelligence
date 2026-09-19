@@ -304,51 +304,92 @@ def spatial_expert(spatial, disease="penyakit"):
 
 
 def risk_expert(result):
+    """Integrated risk-analysis resume: bivariate, multivariate and clinical outcomes."""
     risk = result.get("risk_factors") if isinstance(result, dict) else result
+    outcomes = result.get("outcome_analyses", {}) if isinstance(result, dict) else {}
     if not isinstance(risk, dict):
-        return "### 🧪 RESUME FAKTOR RISIKO\n\nBelum ada hasil analisis faktor risiko."
-    rows = []
+        risk = {}
+
+    bivariate = []
     for factor, obj in risk.items():
-        if not isinstance(obj, dict) or str(factor).startswith("MULTIVARIAT"):
+        if str(factor).startswith("MULTIVARIAT") or not isinstance(obj, dict):
             continue
         p = obj.get("p_value")
         if p is not None and pd.notna(p):
-            rows.append((str(factor), float(p)))
+            bivariate.append((str(factor), float(p)))
+
+    multivariate = []
+    for key, obj in risk.items():
+        if str(key).startswith("MULTIVARIAT"):
+            multivariate.append((str(key), obj))
+
     lines = [
         "### 🧪 RESUME ANALISIS FAKTOR RISIKO",
         "",
-        "Analisis faktor risiko menilai apakah karakteristik/paparan tertentu **berasosiasi** dengan outcome pada dataset. "
-        "Asosiasi statistik **bukan bukti sebab-akibat**.",
+        f"Analisis mencakup **{len(bivariate)} faktor pada analisis bivariat**"
+        + (f" dan **{len(multivariate)} komponen multivariat**." if multivariate else "."),
+        "Interpretasi difokuskan pada pola asosiasi dalam dataset; asosiasi statistik bukan bukti sebab-akibat.",
     ]
-    if rows:
-        sig = [(f,p) for f,p in rows if p < 0.05]
-        if sig:
+
+    sig = [(f, p) for f, p in bivariate if p < 0.05]
+    if sig:
+        lines.append(
+            "**Bivariat:** sinyal asosiasi statistik terdeteksi pada "
+            + ", ".join(f"**{f}** (p={p:.4f})" for f, p in sig)
+            + ". Ukuran efek, CI 95%, confounding, dan kualitas data tetap perlu diperiksa."
+        )
+    elif bivariate:
+        lines.append(
+            "**Bivariat:** tidak ada faktor yang mencapai p<0,05 pada hasil yang tersedia. "
+            "Ini tidak membuktikan tidak adanya faktor risiko."
+        )
+
+    if multivariate:
+        available = []
+        for key, obj in multivariate:
+            if isinstance(obj, dict):
+                analysis = obj.get("analysis", obj)
+                if isinstance(analysis, dict):
+                    available.append(key)
+        if available:
             lines.append(
-                "**Sinyal statistik:** " + ", ".join(f"**{f}** (p={p:.4f})" for f,p in sig) +
-                ". Hasil ini perlu dibaca bersama ukuran efek, CI 95%, ukuran sampel, confounding, dan bias."
+                "**Multivariat:** komponen/model yang tersedia digunakan untuk melihat apakah pola asosiasi "
+                "tetap setelah mempertimbangkan variabel lain. Baca **aOR, CI 95%, dan p-value** bersama-sama; "
+                "model tidak membuktikan kausalitas."
             )
         else:
-            lines.append(
-                "Tidak ada faktor yang mencapai p<0,05 pada hasil yang tersedia. Ini **tidak membuktikan tidak adanya faktor risiko**; "
-                "kekuatan analisis bergantung pada ukuran sampel, kualitas pengukuran, dan variasi outcome."
-            )
+            lines.append("**Multivariat:** struktur analisis tersedia, tetapi hasil model belum cukup untuk diringkas secara statistik.")
+    else:
+        lines.append("**Multivariat:** belum tersedia model yang dapat diringkas pada scope/data ini.")
+
+    outcome_labels = [("Penyakit", "Penyakit"), ("Severity", "Severity"), ("Kasus Meninggal", "Kasus Meninggal")]
+    outcome_lines = []
+    for key, label in outcome_labels:
+        obj = outcomes.get(key) if isinstance(outcomes, dict) else None
+        if not isinstance(obj, dict):
+            continue
+        if not obj.get("available", False):
+            outcome_lines.append(f"**Outcome {label}:** belum memenuhi kecukupan data/model pada scope ini.")
+            continue
+        n = int(obj.get("n", 0) or 0)
+        events = int(obj.get("events", 0) or 0)
+        rate = obj.get("event_rate_pct")
+        p = obj.get("analysis", {}).get("p_value") if isinstance(obj.get("analysis"), dict) else None
+        detail = f"**Outcome {label}:** {n:,} observasi, {events:,} event"
+        if rate is not None and pd.notna(rate):
+            detail += f" ({float(rate):.2f}%)"
+        if p is not None and pd.notna(p):
+            detail += f", p={float(p):.4g}"
+        outcome_lines.append(detail + ".")
+    if outcome_lines:
+        lines.append("")
+        lines.append("**Ringkasan outcome:** " + " ".join(outcome_lines))
+
     lines += [
         "",
-        "### 🔬 Untuk akademisi/praktisi",
-        "**cOR (crude odds ratio)** menunjukkan asosiasi sebelum penyesuaian. **aOR (adjusted odds ratio)** berasal dari model multivariat setelah mengontrol variabel yang dimasukkan ke model. "
-        "OR harus dibaca bersama CI 95%, definisi reference category, missing data, dan strategi pemilihan kovariat.",
-        "Perlu dibedakan antara **confounding**, **effect modification**, dan hubungan kausal. Uji Chi-square hanya menjawab ada/tidaknya asosiasi pada tabel kategorik; "
-        "ia tidak mengukur besarnya risiko dan tidak membuktikan mekanisme.",
-        "",
-        "### 👥 Untuk masyarakat",
-        "Jika komputer menemukan bahwa suatu kelompok lebih sering muncul pada kasus, itu berarti **ada pola hubungan dalam data**. Bukan berarti faktor tersebut pasti menyebabkan penyakit. "
-        "Untuk menyatakan penyebab, dibutuhkan penelitian dan bukti yang lebih kuat.",
-        "",
-        "### ⚠️ Prioritas perbaikan",
-        "Tambahkan denominator populasi, ukuran efek dan CI 95%, pemeriksaan confounding, missingness, multiple testing, serta validasi eksternal sebelum hasil digunakan sebagai dasar kebijakan."
+        "**Catatan metodologis:** cOR menggambarkan asosiasi sebelum penyesuaian, sedangkan aOR menggambarkan asosiasi setelah variabel dalam model dikontrol. Interpretasi akhir perlu mempertimbangkan definisi outcome, reference category, missing data, ukuran sampel, confounding, effect modification, dan validasi eksternal.",
     ]
     return "\n".join(lines)
-
 
 
 def ml_expert(ml, disease=None, label=None):

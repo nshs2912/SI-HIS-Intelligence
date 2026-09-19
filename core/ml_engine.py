@@ -295,6 +295,66 @@ def population_stability_index(reference,current,bins=10):
     rp=pd.cut(r,cuts,include_lowest=True).value_counts(normalize=True,sort=False).to_numpy(); cp=pd.cut(c,cuts,include_lowest=True).value_counts(normalize=True,sort=False).to_numpy()
     rp=np.clip(rp,1e-6,None);cp=np.clip(cp,1e-6,None);return float(np.sum((cp-rp)*np.log(cp/rp)))
 
+
+def spatiotemporal_risk(df, radius_km=20):
+    """Fuse recent temporal burden with nearby burden into a transparent risk signal."""
+    p=_latest_village_features(df,True)
+    if p.empty:return {'status':'error','message':'Fitur spatio-temporal belum tersedia.','data':pd.DataFrame()}
+    n=spatial_neighbor_intelligence(df,radius_km)
+    if n.get('status')!='ok':return n
+    q=n['data'].copy()
+    q['Recent_Burden']=q['Rolling7'].fillna(q['Daily_Cases']).astype(float)
+    rb=q['Recent_Burden']; nb=q['Neighbor_Cases'].fillna(0).astype(float)
+    def norm(s):
+        m=float(s.max()) if len(s) else 0
+        return s/m*100 if m>0 else s*0
+    q['SpatioTemporal_Risk_Score']=(0.60*norm(rb)+0.40*norm(nb)).round(2)
+    q['SpatioTemporal_Risk_Level']=pd.cut(q['SpatioTemporal_Risk_Score'],[-.01,33,66,100.01],labels=['LOW','MEDIUM','HIGH']).astype(str)
+    return {'status':'ok','data':q.sort_values('SpatioTemporal_Risk_Score',ascending=False),'radius_km':radius_km,'method':'Recent burden + spatial neighbour burden'}
+
+def time_person_place_risk(df):
+    """Transparent composite surveillance score across TIME, PERSON and PLACE."""
+    d=_ensure_date(df).copy()
+    if d.empty:return {'status':'error','message':'Data TIME + PERSON + PLACE belum tersedia.','data':pd.DataFrame()}
+    d['Tanggal Sakit']=pd.to_datetime(d.get('Tanggal Sakit'),errors='coerce')
+    time_score=d.groupby(d['Tanggal Sakit'].dt.date).size().rename('Time_Cases')
+    d['Time_Cases']=d['Tanggal Sakit'].dt.date.map(time_score).fillna(0)
+    place_col='Desa/Kelurahan' if 'Desa/Kelurahan' in d.columns else ('Kecamatan' if 'Kecamatan' in d.columns else None)
+    if place_col:
+        ps=d.groupby(place_col).size().rename('Place_Cases'); d['Place_Cases']=d[place_col].map(ps).fillna(0)
+    else:d['Place_Cases']=0
+    person_cols=[c for c in ['Umur','Status Komorbid','Status Imunisasi'] if c in d.columns]
+    if 'Umur' in d.columns:
+        age=pd.to_numeric(d['Umur'],errors='coerce'); d['Person_Score']=np.select([age>=65,age<5],[100,80],default=40)
+    else:d['Person_Score']=40
+    def norm(s):
+        m=float(pd.to_numeric(s,errors='coerce').max())
+        return pd.to_numeric(s,errors='coerce').fillna(0)/m*100 if m>0 else s*0
+    d['TIME_Score']=norm(d['Time_Cases']); d['PLACE_Score']=norm(d['Place_Cases'])
+    d['TIME_PERSON_PLACE_Risk']=(0.30*d['TIME_Score']+0.35*d['Person_Score']+0.35*d['PLACE_Score']).round(2)
+    d['TPP_Risk_Level']=pd.cut(d['TIME_PERSON_PLACE_Risk'],[-.01,33,66,100.01],labels=['LOW','MEDIUM','HIGH']).astype(str)
+    return {'status':'ok','data':d.sort_values('TIME_PERSON_PLACE_Risk',ascending=False),'method':'TIME + PERSON + PLACE composite surveillance score','person_features':person_cols}
+
+def disease_specific_growth_model(df, min_days=14):
+    """Estimate disease-specific recent growth using log-linear regression by disease."""
+    d=_ensure_date(df).copy()
+    if 'Diagnosis Konfirm' not in d.columns or d.empty:return {'status':'error','message':'Diagnosis Konfirm belum tersedia.','data':pd.DataFrame()}
+    d['Disease']=d['Diagnosis Konfirm'].astype(str).str.strip()
+    d=d[(d['Disease']!='')&(d['Disease'].str.lower()!='nan')].dropna(subset=['Tanggal Sakit'])
+    if d.empty:return {'status':'error','message':'Data penyakit bertanggal belum tersedia.','data':pd.DataFrame()}
+    rows=[]
+    for disease,g in d.groupby('Disease'):
+        s=g.groupby(g['Tanggal Sakit'].dt.normalize()).size()
+        if len(s)<min_days:continue
+        idx=np.arange(len(s)); y=np.log1p(s.to_numpy(float))
+        slope=np.polyfit(idx,y,1)[0]; growth_rate=float(np.expm1(slope))
+        rows.append({'Disease':disease,'Days':len(s),'Latest_Daily_Cases':int(s.iloc[-1]),'Growth_Rate_Per_Day':growth_rate,'Doubling_Time_Days':float(np.log(2)/slope) if slope>0 else np.inf})
+    out=pd.DataFrame(rows)
+    if out.empty:return {'status':'error','message':f'Belum ada penyakit dengan minimal {min_days} hari observasi.','data':out}
+    out['Growth_Risk_Score']=(100*out['Growth_Rate_Per_Day'].clip(lower=0).rank(pct=True)).round(2)
+    out['Growth_Risk_Level']=pd.cut(out['Growth_Risk_Score'],[-.01,33,66,100.01],labels=['LOW','MEDIUM','HIGH']).astype(str)
+    return {'status':'ok','data':out.sort_values('Growth_Rate_Per_Day',ascending=False),'method':'Disease-specific log-linear growth model','min_days':min_days}
+
 def save_model(result,path):
     if result and result.get('status')=='ok':joblib.dump(result['model'],path);return path
     return None

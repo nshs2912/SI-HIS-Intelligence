@@ -149,6 +149,7 @@ def build_provider_intelligence(df, provider_type="Rumah Sakit"):
         "operational_segments":operational_segments(ov["data"]),
         "lab":lab_intelligence(ov["data"]),
         "pharmacy":pharmacy_intelligence(ov["data"]),
+        "provider_specific":provider_specific_intelligence(ov["data"], provider_type),
         "predictive":provider_predictive_signal(ov["data"],provider_type),
         "fhir_resource_map":FHIR_RESOURCE_MAP,
         "care_loop":"PATIENT → ENCOUNTER → SERVICE/DIAGNOSTIC → TREATMENT/PHARMACY → OUTCOME → ANALYSIS → PREDICTION → INTERVENTION → OUTCOME",
@@ -177,3 +178,66 @@ Arsitektur dirancang mengikuti **HL7 FHIR/SATUSEHAT**. Resource seperti Patient,
 PATIENT → ENCOUNTER → DIAGNOSTIC/TREATMENT → PHARMACY → OUTCOME → ANALYSIS → PREDICTION → INTERVENTION → NEW DATA → CONTINUOUS LEARNING
 
 Tujuan akhirnya adalah membuat fasyankes bergerak dari **sekadar digitalisasi transaksi menuju continuous clinical & operational intelligence**."""
+
+
+# Provider-specific intelligence layers
+PROVIDER_INTELLIGENCE_SPEC = {
+    "Rumah Sakit": {
+        "domains": ["capacity", "clinical_mix", "bed_or_service_demand", "laboratory", "pharmacy", "referral", "quality_outcome"],
+        "kpis": ["volume", "unique_patients", "waiting_time", "length_of_stay", "readmission", "referral", "mortality", "cost"],
+    },
+    "Klinik": {
+        "domains": ["outpatient_demand", "clinical_mix", "waiting_time", "referral", "laboratory", "pharmacy", "follow_up"],
+        "kpis": ["visit_volume", "unique_patients", "waiting_time", "referral_rate", "follow_up", "cost"],
+    },
+    "Laboratorium": {
+        "domains": ["test_volume", "turnaround_time", "specimen", "quality", "referral", "reagent_demand"],
+        "kpis": ["test_volume", "tat", "pending_results", "rejection_rate", "repeat_test", "reagent_demand"],
+    },
+    "Apotek/Farmasi": {
+        "domains": ["prescription", "dispensing", "medication_utilization", "stock", "expiry", "refill"],
+        "kpis": ["prescription_volume", "dispensing_volume", "stock_days", "stockout_signal", "expiry_signal", "refill"],
+    },
+}
+
+def provider_specific_intelligence(df, provider_type):
+    """Return provider-specific KPI signals without inventing unavailable fields."""
+    d = prepare_provider(df)
+    spec = PROVIDER_INTELLIGENCE_SPEC.get(provider_type, {})
+    out = {"provider_type": provider_type, "domains": spec.get("domains", []), "kpis": spec.get("kpis", [])}
+    if d.empty:
+        out["status"] = "empty"
+        return out
+    out["status"] = "ok"
+
+    if provider_type == "Rumah Sakit":
+        out["capacity_signal"] = {
+            "waiting_time_mean": round(float(d["Waktu Tunggu"].mean()), 2)
+            if "Waktu Tunggu" in d else None,
+            "length_of_stay_mean": round(float(d["Lama Rawat"].mean()), 2)
+            if "Lama Rawat" in d else None,
+        }
+        out["outcome_signal"] = {
+            "deaths": int(_num(d["Meninggal"]).fillna(0).sum())
+            if "Meninggal" in d else None,
+        }
+    elif provider_type == "Klinik":
+        out["access_signal"] = {
+            "waiting_time_mean": round(float(d["Waktu Tunggu"].mean()), 2)
+            if "Waktu Tunggu" in d else None,
+            "referral_rows": int(d["Rujukan"].notna().sum())
+            if "Rujukan" in d else None,
+        }
+    elif provider_type == "Laboratorium":
+        out["laboratory_signal"] = {
+            "mean_tat": round(float(d["Turnaround Time"].mean()), 2)
+            if "Turnaround Time" in d else None,
+            "tests": int(len(d)),
+        }
+    elif provider_type == "Apotek/Farmasi":
+        out["pharmacy_signal"] = {
+            "prescription_rows": int(len(d)),
+            "mean_stock": round(float(d["Stok"].mean()), 2)
+            if "Stok" in d else None,
+        }
+    return out

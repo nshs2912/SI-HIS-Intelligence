@@ -21,6 +21,7 @@ from core.engine import SIHISIntelligenceEngine
 from core.disease_intelligence import classify_disease
 from core.scope import QueryScope
 from core.workforce_intelligence import build_workforce_intelligence, workforce_policy_narrative
+from core.provider_intelligence import build_provider_intelligence, provider_policy_narrative, PROVIDER_TYPES
 warnings.filterwarnings('ignore')
 st.set_page_config(page_title='SI-HIS — Continuous Health Intelligence',page_icon='🧠',layout='wide')
 st.markdown('''<div style="padding:26px 30px 24px;border-radius:16px;border:1px solid #cbd5e1;background:linear-gradient(135deg,#f8fafc 0%,#eef6ff 100%);box-shadow:0 4px 18px rgba(15,23,42,.06);"><div style="font-size:.92rem;letter-spacing:.12em;text-transform:uppercase;color:#64748b;font-weight:700;">SI-HIS</div><h1 style="margin:4px 0 2px;color:#0f172a;font-size:2.05rem;">Smart Integrated Health Intelligence System</h1><div style="font-size:1.25rem;color:#1d4ed8;font-weight:800;margin-top:14px;">CONTINUOUS HEALTH INTELLIGENCE ENGINE</div><div style="margin-top:7px;color:#475569;font-weight:600;">Data → Intelligence → Prediction → Prescription → Outcome → New Data → Continuous Learning</div><div style="height:1px;background:#cbd5e1;margin:20px 0 17px;"></div><div style="font-size:.95rem;letter-spacing:.08em;text-transform:uppercase;color:#64748b;font-weight:700;">Powered by SI-HIS</div><div style="font-size:1.35rem;color:#0f172a;font-weight:800;margin-top:3px;">NutriMed MyLab</div><div style="font-size:1.02rem;color:#334155;font-weight:700;margin-top:3px;">Personal Health Companion &amp; Longitudinal Health Journey</div><div style="margin-top:12px;color:#475569;font-style:italic;">From Individual Health to Population Health — and Back.</div></div>''',unsafe_allow_html=True)
@@ -79,6 +80,64 @@ CORPORATE WORKFORCE HEALTH DASHBOARD
 Program K3/occupational health → prevention → referral → outcome
    ↺ feedback to NutriMed MyLab""")
     st.warning("Governance: data kesehatan adalah data pribadi spesifik. Dashboard korporat harus menggunakan minimisasi data, agregasi, access control, audit trail, dan cohort suppression. Prototype memakai minimum cohort 10; ambang produksi perlu ditetapkan bersama governance/legal/DPO perusahaan.")
+
+def render_provider_dashboard(df, provider_type="Rumah Sakit"):
+    st.markdown(f"## 🏥 {provider_type} — Healthcare Provider Intelligence")
+    st.caption("SI-HIS mengubah data pelayanan fasyankes menjadi clinical-operational intelligence. Dashboard bersifat Decision Support System.")
+    result=build_provider_intelligence(df,provider_type)
+    if result.get("status")!="ok":
+        st.warning(result.get("message","Data fasyankes belum tersedia.")); return
+    m=result.get("overview",{})
+    st.markdown("### 📊 Executive Provider Dashboard")
+    cards=[("Observasi layanan",m.get("observations",0)),("Pasien unik",m.get("unique_patients","N/A")),("Jenis diagnosis",m.get("diagnoses","N/A")),("Mean waktu tunggu",m.get("mean_waiting_time","N/A")),("Mean TAT",m.get("mean_turnaround_time","N/A")),("Total biaya",m.get("total_cost","N/A"))]
+    cols=st.columns(3)
+    for i,(lab,val) in enumerate(cards):
+        cols[i%3].metric(lab, f"{val:,}" if isinstance(val,(int,np.integer)) else (f"{val:,.2f}" if isinstance(val,(float,np.floating)) else str(val)))
+    st.markdown(provider_policy_narrative(result))
+    st.markdown("### 1️⃣ Service Volume & Demand")
+    sv=result.get("service_volume")
+    if isinstance(sv,pd.DataFrame) and not sv.empty:
+        st.line_chart(sv.set_index("Tanggal")["Volume"]); st.dataframe(sv,use_container_width=True,hide_index=True)
+    else: st.info("Deret waktu layanan belum tersedia.")
+    st.markdown("### 2️⃣ Clinical / Service Mix")
+    cm=result.get("clinical_mix")
+    if isinstance(cm,pd.DataFrame) and not cm.empty: st.dataframe(cm,use_container_width=True,hide_index=True)
+    else: st.info("Data diagnosis/jenis layanan belum tersedia.")
+    st.markdown("### 3️⃣ Operational Intelligence")
+    ops=result.get("operational_segments")
+    if isinstance(ops,pd.DataFrame) and not ops.empty: st.dataframe(ops,use_container_width=True,hide_index=True)
+    else: st.info("Segmentasi operasional belum tersedia.")
+    if provider_type in {"Rumah Sakit","Klinik","Laboratorium"}:
+        st.markdown("### 4️⃣ Laboratory Intelligence")
+        lab=result.get("lab",{})
+        if lab.get("status")=="ok":
+            if isinstance(lab.get("test_volume"),pd.DataFrame): st.dataframe(lab["test_volume"],use_container_width=True,hide_index=True)
+            if lab.get("mean_tat") is not None: st.metric("Mean Turnaround Time",lab["mean_tat"])
+        else: st.info(lab.get("message","Data laboratorium belum tersedia."))
+    if provider_type in {"Rumah Sakit","Klinik","Apotek/Farmasi"}:
+        st.markdown("### 5️⃣ Pharmacy Intelligence")
+        ph=result.get("pharmacy",{})
+        if ph.get("status")=="ok":
+            if isinstance(ph.get("dispensing_volume"),pd.DataFrame): st.dataframe(ph["dispensing_volume"],use_container_width=True,hide_index=True)
+            if ph.get("stock_mean") is not None: st.metric("Mean stok",ph["stock_mean"])
+        else: st.info(ph.get("message","Data farmasi belum tersedia."))
+    st.markdown("### 6️⃣ Predictive Provider Intelligence")
+    pred=result.get("predictive",{})
+    if pred.get("status")=="ok":
+        a,b,c=st.columns(3); a.metric("Rata-rata 7 hari",pred["recent_7d_mean"]); b.metric("Rata-rata 7 hari sebelumnya",pred["previous_7d_mean"]); c.metric("Perubahan 7 hari",f"{pred['growth_7d_pct']:.2f}%")
+        st.info(pred["interpretation"]+" Gunakan sebagai sinyal kapasitas, bukan kepastian.")
+    else: st.info(pred.get("message","Predictive provider intelligence belum tersedia."))
+    st.markdown("### 7️⃣ Prescriptive / Decision Support")
+    st.markdown("""
+- **Capacity:** evaluasi SDM, jam layanan, bed/ruang, alat dan antrean sesuai pola demand.
+- **Laboratory:** evaluasi volume pemeriksaan, turnaround time, kapasitas alat, spesimen dan kebutuhan reagen.
+- **Pharmacy:** evaluasi resep, dispensing, pola penggunaan obat dan kebutuhan stok.
+- **Clinical pathway:** identifikasi kebutuhan follow-up, rujukan dan continuity of care.
+- **Quality & outcome:** hubungkan indikator proses dengan outcome pasien dan lakukan perbaikan berulang.
+""")
+    st.markdown("### 🔗 FHIR / SATUSEHAT Canonical Layer")
+    st.dataframe(pd.DataFrame([{"Domain":k,"FHIR Resource":v} for k,v in result["fhir_resource_map"].items()]),use_container_width=True,hide_index=True)
+    st.caption("Pemetaan ini adalah canonical architecture SI-HIS. Implementasi produksi harus mengikuti profile, terminology, validation rule, dan use case SATUSEHAT yang berlaku.")
 
 st.caption(f"🕒 Waktu Sistem: {get_wib_time()['full']}")
 engine=SIHISIntelligenceEngine()
@@ -1085,6 +1144,10 @@ if corporate_mode:
     st.markdown('---')
     render_workforce_dashboard(df_raw, 'Corporate Workforce')
 
+if provider_mode:
+    st.markdown('---')
+    render_provider_dashboard(df_raw, provider_type)
+
 st.caption('SI-HIS Intelligence — epidemiological decision-support with TIME + PERSON + PLACE.')
 st.sidebar.header('⚙️ Panel Kontrol & Filter')
 source_options=get_source_catalog()
@@ -1126,7 +1189,7 @@ for col in ['Diagnosis Konfirm','Diagnosis Probabel','Diagnosis Suspek']:
 sel_disease=st.sidebar.selectbox('3. Diagnosis Penyakit',['Semua Penyakit']+sorted(disease_values))
 with st.sidebar.expander('Drill-down wilayah (opsional)'):
     kecs=sorted(dfk['Kecamatan'].dropna().astype(str).unique()) if 'Kecamatan' in dfk else [];sel_kec=st.selectbox('Kecamatan',['Semua Kecamatan']+kecs);dbase=dfk if sel_kec=='Semua Kecamatan' else dfk[dfk['Kecamatan'].astype(str).eq(sel_kec)];villages=sorted(dbase['Desa/Kelurahan'].dropna().astype(str).unique()) if 'Desa/Kelurahan' in dbase else [];sel_desa=st.selectbox('Desa/Kelurahan',['Semua Desa/Kelurahan']+villages);vbase=dbase if sel_desa=='Semua Desa/Kelurahan' else dbase[dbase['Desa/Kelurahan'].astype(str).eq(sel_desa)];pusk=sorted(vbase['Puskesmas'].dropna().astype(str).unique()) if 'Puskesmas' in vbase else [];sel_pusk=st.selectbox('Puskesmas',['Semua Puskesmas']+pusk)
-include_ml=st.sidebar.checkbox('Aktifkan ML layer',False);corporate_mode=st.sidebar.checkbox('🏢 Workforce Health Intelligence',False);scope=QueryScope(province=None if sel_prov=='Semua Provinsi' else sel_prov,district=None if sel_kab=='Semua Kabupaten/Kota' else sel_kab,kecamatan=None if sel_kec=='Semua Kecamatan' else sel_kec,village=None if sel_desa=='Semua Desa/Kelurahan' else sel_desa,puskesmas=None if sel_pusk=='Semua Puskesmas' else sel_pusk,disease=None if sel_disease=='Semua Penyakit' else sel_disease,period_days=3650)
+include_ml=st.sidebar.checkbox('Aktifkan ML layer',False);corporate_mode=st.sidebar.checkbox('🏢 Workforce Health Intelligence',False);provider_mode=st.sidebar.checkbox('🏥 Healthcare Provider Intelligence',False);provider_type=st.sidebar.selectbox('Jenis Fasyankes',list(PROVIDER_TYPES.keys())) if provider_mode else 'Rumah Sakit';scope=QueryScope(province=None if sel_prov=='Semua Provinsi' else sel_prov,district=None if sel_kab=='Semua Kabupaten/Kota' else sel_kab,kecamatan=None if sel_kec=='Semua Kecamatan' else sel_kec,village=None if sel_desa=='Semua Desa/Kelurahan' else sel_desa,puskesmas=None if sel_pusk=='Semua Puskesmas' else sel_pusk,disease=None if sel_disease=='Semua Penyakit' else sel_disease,period_days=3650)
 if sel_disease=='Semua Penyakit':
     result=engine.descriptive(dfk);label=sel_kab if sel_kab!='Semua Kabupaten/Kota' else (sel_prov if sel_prov!='Semua Provinsi' else 'Indonesia');st.markdown(f'## 📊 Analisis Deskriptif — {label}');ov=result['overview'];a,b=st.columns(2);a.metric('Total Kunjungan Pasien',f"{ov['total_cases']:,}");b.metric('Kasus Meninggal',f"{ov['deaths']:,}");st.markdown('### Resume Epidemiologi');show_resume(descriptive_expert(result,label));st.markdown('### 🏆 10 Besar Penyakit');show_resume('Tabel ini menunjukkan penyakit dengan beban kasus terbesar dalam scope yang dipilih. Jumlah kasus menggambarkan beban absolut; CFR menggambarkan proporsi kematian di antara kasus dan tidak boleh ditafsirkan sebagai mortality rate populasi tanpa denominator yang sesuai.');render_value(result['top10_diseases']);st.markdown('### Distribusi');show_resume('Distribusi berikut memperlihatkan komposisi kasus menurut penyakit, jenis kelamin, kelompok umur, provinsi, dan kabupaten/kota. Perbedaan jumlah kasus adalah temuan deskriptif dan tidak otomatis menunjukkan perbedaan risiko.');render_value(result['disease_distribution']);render_value(result['sex_distribution'],'Jenis Kelamin');render_value(result['age_distribution'],'Kelompok Umur');render_value(result['province_distribution'],'Provinsi');render_value(result['district_distribution'].head(50),'Kabupaten/Kota')
 else:

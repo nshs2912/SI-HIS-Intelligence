@@ -1177,71 +1177,71 @@ else:
         render_risk_factors(result.get('risk_factors'))
     if not vector_borne:
         with tabs[5]:
-            st.markdown('### 🤖 Analisis ML')
-        orch=result.get('intelligence_orchestration',{})
-        incident=result.get('incident_reasoning_v2',{})
-        disease_profile=result.get('disease_intelligence',{}) if isinstance(result.get('disease_intelligence',{}),dict) else {}
-        disease_context_known=(
-            str(disease_profile.get('family','')).upper() in {'MENULAR','PTM'}
-            and str(disease_profile.get('transmission','')).lower() not in {'','unknown','mixed'}
-        )
-        if isinstance(incident,dict) and not disease_context_known:
-            st.markdown('### 🚨 Incident & Outbreak Reasoning v2')
-            st.caption('Menggabungkan temporal burst, spatio-temporal cluster, sindrom gejala, attack rate, facility surge, severity/mortality burst, exposure, dan corroboration lingkungan. Skor adalah triage internal.')
-            ic1,ic2,ic3=st.columns(3)
-            ic1.metric('Evidence Score',str(incident.get('evidence_score','-'))+'/100')
-            ic2.metric('Priority',str(incident.get('priority','-')))
-            ic3.metric('Status',str(incident.get('status','-')))
-            sig=incident.get('signals',[])
-            if sig: st.warning('Sinyal: '+', '.join(map(str,sig)))
-            with st.expander('🔬 Detail Incident Reasoning',expanded=bool(sig)):
-                render_value(incident.get('temporal'),'Multi-window temporal scan')
-                render_value(incident.get('spatiotemporal'),'Spatial-temporal finest unit')
-                render_value(incident.get('symptom_syndromes'),'Symptom / syndrome clustering')
-                render_value(incident.get('attack_rate'),'Exposed vs non-exposed / attack rate')
-                render_value(incident.get('facility_surge'),'Facility surge')
-                render_value(incident.get('severity_mortality'),'Severity & mortality burst')
-                render_value(incident.get('environmental'),'Environmental / incident corroboration')
-                render_value(incident.get('hypotheses'),'Differential hypotheses')
-        tox=result.get('toxicology_intelligence',{})
-        if isinstance(tox,dict):
-            st.markdown('### ☣️ Acute Toxicology & Poisoning Intelligence')
-            st.caption('Menganalisis rute paparan, onset, pola gejala/tanda klinis, tipe agen, dan kandidat etiologi. Kandidat agen bukan diagnosis dan memerlukan konfirmasi klinis, epidemiologis, laboratorium, atau toksikologi.')
-            tc1,tc2=st.columns(2)
-            tc1.metric('Status',str(tox.get('status','-')))
-            tc2.metric('Median Paparan → Onset',str(tox.get('median_exposure_to_onset_hours','-'))+' jam')
-            routes=tox.get('detected_routes',[])
-            if routes: st.info('Rute paparan terdeteksi: **'+', '.join(map(str,routes))+'**')
-            candidates=tox.get('candidates',[])
-            if candidates:
-                st.markdown('#### Kandidat Agen Penyebab — Differential Support')
-                st.dataframe(pd.DataFrame(candidates)[['agent','agent_type','score','typical_onset','route','clinical_syndrome']],use_container_width=True,hide_index=True)
-                st.caption('Urutan kandidat adalah hasil pattern matching internal, bukan probabilitas diagnosis. Konfirmasi etiologi memerlukan bukti paparan dan pemeriksaan yang sesuai.')
-            with st.expander('🔬 Knowledge Base Agen, Gejala, Onset & Paparan'):
-                profiles=tox.get('profiles',[])
-                if profiles: st.dataframe(pd.DataFrame(profiles),use_container_width=True,hide_index=True)
-        if isinstance(orch,dict):
-            st.markdown('### 🧠 SI-HIS Intelligence Orchestrator')
-            st.caption('Lapisan orkestrasi menggabungkan sinyal temporal, spasial, unit terkecil, acute-event, disease context, uncertainty, dan hasil ML. Ini adalah triage intelligence, bukan diagnosis atau penetapan KLB/bencana.')
-            oc1,oc2,oc3=st.columns(3)
-            oc1.metric('Status Intelligence',str(orch.get('status','-')))
-            oc2.metric('Prioritas',str(orch.get('priority','-')))
-            ev=orch.get('evidence_fusion',{}) if isinstance(orch.get('evidence_fusion'),dict) else {}
-            unc=ev.get('uncertainty',{}) if isinstance(ev.get('uncertainty'),dict) else {}
-            oc3.metric('Confidence Evidence',str(unc.get('confidence','-'))+' ('+str(unc.get('score','-'))+')')
-            active=ev.get('active_signals',[])
-            if active: st.warning('Sinyal aktif: '+', '.join(map(str,active)))
-            finest=ev.get('finest_unit',{}) if isinstance(ev.get('finest_unit'),dict) else {}
-            top=finest.get('highest_signal_unit',{}) if isinstance(finest.get('highest_signal_unit'),dict) else {}
-            if top: st.info('📍 Unit prioritas terkecil: **'+str(top.get('Unit','-'))+'** | Level: **'+str(top.get('Level','-'))+'** | Kasus: **'+str(top.get('Kasus','-'))+'** | Kepadatan: **'+str(top.get('Kepadatan_per_Jam','-'))+'/jam**')
-            with st.expander('🔎 Evidence Fusion & Unknown Event Detection',expanded=bool(active)):
-                render_value(ev.get('multi_window'),'Multi-Window Scan')
-                render_value(ev.get('unknown_event'),'Unknown Event Detection')
-                render_value(ev.get('uncertainty'),'Uncertainty Intelligence')
-                render_value(orch.get('next_actions'),'Next Actions')
-        show_tab_resume('Resume Machine Learning',ml_expert(result.get('ml')),'performa model, feature importance dan hasil ML di bawah')
-        st.caption('Analisis ML mendukung decision support dan melengkapi analisis epidemiologi, bukan menggantikannya.')
-        if include_ml:render_ml_report(result.get('ml'),sel_disease,label)
-        else:st.info('ML layer belum diaktifkan. Centang **Aktifkan ML layer** pada Panel Kontrol untuk menjalankan prediction models.')
-
+                st.markdown('### 🤖 Analisis ML')
+            orch=result.get('intelligence_orchestration',{})
+            incident=result.get('incident_reasoning_v2',{})
+            disease_profile=result.get('disease_intelligence',{}) if isinstance(result.get('disease_intelligence',{}),dict) else {}
+            disease_context_known=(
+                str(disease_profile.get('family','')).upper() in {'MENULAR','PTM'}
+                and str(disease_profile.get('transmission','')).lower() not in {'','unknown','mixed'}
+            )
+            if isinstance(incident,dict) and not disease_context_known:
+                st.markdown('### 🚨 Incident & Outbreak Reasoning v2')
+                st.caption('Menggabungkan temporal burst, spatio-temporal cluster, sindrom gejala, attack rate, facility surge, severity/mortality burst, exposure, dan corroboration lingkungan. Skor adalah triage internal.')
+                ic1,ic2,ic3=st.columns(3)
+                ic1.metric('Evidence Score',str(incident.get('evidence_score','-'))+'/100')
+                ic2.metric('Priority',str(incident.get('priority','-')))
+                ic3.metric('Status',str(incident.get('status','-')))
+                sig=incident.get('signals',[])
+                if sig: st.warning('Sinyal: '+', '.join(map(str,sig)))
+                with st.expander('🔬 Detail Incident Reasoning',expanded=bool(sig)):
+                    render_value(incident.get('temporal'),'Multi-window temporal scan')
+                    render_value(incident.get('spatiotemporal'),'Spatial-temporal finest unit')
+                    render_value(incident.get('symptom_syndromes'),'Symptom / syndrome clustering')
+                    render_value(incident.get('attack_rate'),'Exposed vs non-exposed / attack rate')
+                    render_value(incident.get('facility_surge'),'Facility surge')
+                    render_value(incident.get('severity_mortality'),'Severity & mortality burst')
+                    render_value(incident.get('environmental'),'Environmental / incident corroboration')
+                    render_value(incident.get('hypotheses'),'Differential hypotheses')
+            tox=result.get('toxicology_intelligence',{})
+            if isinstance(tox,dict):
+                st.markdown('### ☣️ Acute Toxicology & Poisoning Intelligence')
+                st.caption('Menganalisis rute paparan, onset, pola gejala/tanda klinis, tipe agen, dan kandidat etiologi. Kandidat agen bukan diagnosis dan memerlukan konfirmasi klinis, epidemiologis, laboratorium, atau toksikologi.')
+                tc1,tc2=st.columns(2)
+                tc1.metric('Status',str(tox.get('status','-')))
+                tc2.metric('Median Paparan → Onset',str(tox.get('median_exposure_to_onset_hours','-'))+' jam')
+                routes=tox.get('detected_routes',[])
+                if routes: st.info('Rute paparan terdeteksi: **'+', '.join(map(str,routes))+'**')
+                candidates=tox.get('candidates',[])
+                if candidates:
+                    st.markdown('#### Kandidat Agen Penyebab — Differential Support')
+                    st.dataframe(pd.DataFrame(candidates)[['agent','agent_type','score','typical_onset','route','clinical_syndrome']],use_container_width=True,hide_index=True)
+                    st.caption('Urutan kandidat adalah hasil pattern matching internal, bukan probabilitas diagnosis. Konfirmasi etiologi memerlukan bukti paparan dan pemeriksaan yang sesuai.')
+                with st.expander('🔬 Knowledge Base Agen, Gejala, Onset & Paparan'):
+                    profiles=tox.get('profiles',[])
+                    if profiles: st.dataframe(pd.DataFrame(profiles),use_container_width=True,hide_index=True)
+            if isinstance(orch,dict):
+                st.markdown('### 🧠 SI-HIS Intelligence Orchestrator')
+                st.caption('Lapisan orkestrasi menggabungkan sinyal temporal, spasial, unit terkecil, acute-event, disease context, uncertainty, dan hasil ML. Ini adalah triage intelligence, bukan diagnosis atau penetapan KLB/bencana.')
+                oc1,oc2,oc3=st.columns(3)
+                oc1.metric('Status Intelligence',str(orch.get('status','-')))
+                oc2.metric('Prioritas',str(orch.get('priority','-')))
+                ev=orch.get('evidence_fusion',{}) if isinstance(orch.get('evidence_fusion'),dict) else {}
+                unc=ev.get('uncertainty',{}) if isinstance(ev.get('uncertainty'),dict) else {}
+                oc3.metric('Confidence Evidence',str(unc.get('confidence','-'))+' ('+str(unc.get('score','-'))+')')
+                active=ev.get('active_signals',[])
+                if active: st.warning('Sinyal aktif: '+', '.join(map(str,active)))
+                finest=ev.get('finest_unit',{}) if isinstance(ev.get('finest_unit'),dict) else {}
+                top=finest.get('highest_signal_unit',{}) if isinstance(finest.get('highest_signal_unit'),dict) else {}
+                if top: st.info('📍 Unit prioritas terkecil: **'+str(top.get('Unit','-'))+'** | Level: **'+str(top.get('Level','-'))+'** | Kasus: **'+str(top.get('Kasus','-'))+'** | Kepadatan: **'+str(top.get('Kepadatan_per_Jam','-'))+'/jam**')
+                with st.expander('🔎 Evidence Fusion & Unknown Event Detection',expanded=bool(active)):
+                    render_value(ev.get('multi_window'),'Multi-Window Scan')
+                    render_value(ev.get('unknown_event'),'Unknown Event Detection')
+                    render_value(ev.get('uncertainty'),'Uncertainty Intelligence')
+                    render_value(orch.get('next_actions'),'Next Actions')
+            show_tab_resume('Resume Machine Learning',ml_expert(result.get('ml')),'performa model, feature importance dan hasil ML di bawah')
+            st.caption('Analisis ML mendukung decision support dan melengkapi analisis epidemiologi, bukan menggantikannya.')
+            if include_ml:render_ml_report(result.get('ml'),sel_disease,label)
+            else:st.info('ML layer belum diaktifkan. Centang **Aktifkan ML layer** pada Panel Kontrol untuk menjalankan prediction models.')
+    
 st.caption('SI-HIS Intelligence — epidemiological decision-support with TIME + PERSON + PLACE.'\n)

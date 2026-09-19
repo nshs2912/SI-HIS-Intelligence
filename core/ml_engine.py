@@ -18,6 +18,28 @@ from statsmodels.tsa.holtwinters import ExponentialSmoothing
 import joblib
 
 RANDOM_STATE = 42
+
+# Small-stratum reliability is treated as a first-class ML output.
+# The exact thresholds are configurable and are screening safeguards, not
+# universal epidemiological rules. Small counts can produce unstable rates.
+STABILITY_THRESHOLDS = {"low_max_n": 15, "medium_max_n": 29}
+
+def _stability_label(n, events=None):
+    n = int(n or 0)
+    if n <= STABILITY_THRESHOLDS["low_max_n"]:
+        return "RENDAH"
+    if n <= STABILITY_THRESHOLDS["medium_max_n"]:
+        return "SEDANG"
+    return "MEMADAI"
+
+def _stability_note(n, events=None):
+    label = _stability_label(n, events)
+    if label == "RENDAH":
+        return "Ukuran sampel kecil; estimasi dapat tidak stabil dan tidak boleh digeneralisasikan langsung ke populasi."
+    if label == "SEDANG":
+        return "Ukuran sampel masih perlu kehati-hatian; interpretasi sebaiknya disertai interval ketidakpastian."
+    return "Ukuran sampel relatif lebih memadai untuk screening; validasi eksternal tetap diperlukan."
+
 SEVERITY_FEATURES = ['Umur','Jenis Kelamin','Pekerjaan','Status Imunisasi','Status Komorbid','Riwayat Perjalanan','Faktor Risiko Lain']
 
 
@@ -79,7 +101,7 @@ def _train_classifier(df,target,features,label):
     metrics={'roc_auc':roc_auc_score(yte,p),'pr_auc':average_precision_score(yte,p),'accuracy':accuracy_score(yte,pred),'precision':precision_score(yte,pred,zero_division=0),'recall':recall_score(yte,pred,zero_division=0),'specificity':tn/(tn+fp) if tn+fp else np.nan,'f1':f1_score(yte,pred,zero_division=0),'brier':brier_score_loss(yte,p)}
     positive_rate=float(yte.mean())
     metrics['Narrative']=_metrics_narrative(metrics,label,positive_rate)
-    return {'status':'ok','model':model,'features':features,'label':label,'metrics':metrics,**{k:v for k,v in metrics.items() if k != 'Narrative'},'feature_importance':_feature_importance(model,Xte,yte,features),'holdout_start':te['Tanggal Sakit'].min() if 'Tanggal Sakit' in te else None,'train_rows':len(tr),'test_rows':len(te),'positive_rate':positive_rate}
+    return {'status':'ok','model':model,'features':features,'label':label,'metrics':metrics,**{k:v for k,v in metrics.items() if k != 'Narrative'},'feature_importance':_feature_importance(model,Xte,yte,features),'holdout_start':te['Tanggal Sakit'].min() if 'Tanggal Sakit' in te else None,'train_rows':len(tr),'test_rows':len(te),'positive_rate':positive_rate,'stability':_stability_label(len(te),int(yte.sum())),'stability_note':_stability_note(len(te),int(yte.sum()))}
 
 
 def _severity_target(df):
@@ -242,21 +264,99 @@ def spatial_neighbor_intelligence(df, radius_km=20):
 
 
 def vulnerability_clustering(df):
-    """Unsupervised clustering of person-level vulnerability profiles."""
-    d=df.copy(); cols=[c for c in ['Umur','Status Komorbid','Status Imunisasi','Pekerjaan','Merokok','Aktivitas Fisik'] if c in d.columns]
-    if len(d)<30 or 'Umur' not in d.columns:return {'status':'error','message':'Data person belum cukup untuk vulnerability clustering.','data':pd.DataFrame()}
-    # Keep the prototype explainable: age + encoded categorical burden counts.
-    x=pd.DataFrame(index=d.index); x['Umur']=pd.to_numeric(d['Umur'],errors='coerce').fillna(pd.to_numeric(d['Umur'],errors='coerce').median())
-    for c in cols:
-        if c=='Umur':continue
-        x[c+'_Yes']=d[c].astype(str).str.lower().isin(['ya','yes','positif','ada','berisiko','tinggi']).astype(int)
-    from sklearn.cluster import KMeans
-    n_clusters=2 if len(x)>=60 else 2
-    model=KMeans(n_clusters=n_clusters,n_init=10,random_state=RANDOM_STATE)
-    labels=model.fit_predict(x); out=d.copy(); out['Vulnerability_Cluster']=labels
-    profile=out.groupby('Vulnerability_Cluster').size().rename('Cases').reset_index()
-    return {'status':'ok','data':out,'cluster_profile':profile,'method':'KMeans vulnerability profile'}
+    """Cluster person-level vulnerability and produce explicit interpretable strata.
 
+    The KMeans cluster remains exploratory. The companion stratification table
+    is deterministic and reports age, occupation, comorbidity, burden and CFR.
+    Small strata are flagged so high observed CFR cannot be mistaken for stable
+    population risk.
+    """
+    d=df.copy()
+    if len(d)<30 or 'Umur' not in d.columns:
+        return {'status':'error','message':'Data person belum cukup untuk vulnerability clustering/stratification.','data':pd.DataFrame()}
+
+    age=pd.to_numeric(d['Umur'],errors='coerce')
+    d['Age_Group']=pd.cut(
+        age,
+        bins=[-np.inf,5,19,46,65,np.inf],
+        labels=['<5 tahun','5–18 tahun','19–45 tahun','46–64 tahun','≥65 tahun'],
+        right=False
+    ).astype(str)
+
+    def yes(s):
+        return s.astype(str).str.strip().str.lower().isin(
+            ['ya','yes','positif','ada','ada komorbid','berisiko','tinggi','1','true']
+        )
+
+    d['_Death']=_safe_binary(d['Is_Meninggal']).fillna(0).astype(int) if 'Is_Meninggal' in d.columns else 0
+    d['_Comorbidity']=yes(d['Status Komorbid']).astype(int) if 'Status Komorbid' in d.columns else 0
+
+    # Explainable KMeans representation.
+    x=pd.DataFrame(index=d.index)
+    x['Umur']=age.fillna(age.median())
+    for col in ['Status Komorbid','Status Imunisasi','Pekerjaan','Merokok','Aktivitas Fisik']:
+        if col in d.columns:
+            x[col+'_Yes']=yes(d[col]).astype(int)
+    model=KMeans(n_clusters=2,n_init=10,random_state=RANDOM_STATE)
+    d['Vulnerability_Cluster']=model.fit_predict(x)
+
+    occupation=d['Pekerjaan'].fillna('Tidak diketahui').astype(str) if 'Pekerjaan' in d.columns else pd.Series('Semua pekerjaan',index=d.index)
+    strata=d.assign(_Occupation=occupation).groupby(
+        ['Age_Group','_Occupation','_Comorbidity'],dropna=False
+    ).agg(
+        Jumlah_Observasi=('_Death','size'),
+        Meninggal=('_Death','sum')
+    ).reset_index()
+    strata['CFR_Persen']=np.where(
+        strata['Jumlah_Observasi']>0,
+        strata['Meninggal']/strata['Jumlah_Observasi']*100,
+        np.nan
+    ).round(2)
+    strata['Stabilitas']=strata['Jumlah_Observasi'].map(_stability_label)
+    strata['Interpretasi']=np.where(
+        strata['Stabilitas'].eq('RENDAH'),
+        'Sinyal prioritas pada dataset; estimasi tidak stabil dan tidak langsung digeneralisasikan.',
+        np.where(
+            strata['Stabilitas'].eq('SEDANG'),
+            'Sinyal surveillance; interpretasikan bersama interval ketidakpastian dan konteks populasi.',
+            'Strata relatif lebih stabil untuk screening; tetap memerlukan validasi eksternal.'
+        )
+    )
+    strata['Usia']=strata['Age_Group']
+    strata['Pekerjaan']=strata['_Occupation']
+    strata['Komorbid']=np.where(strata['_Comorbidity'].eq(1),'Ada','Tidak')
+    strata['Stability_Note']=strata['Jumlah_Observasi'].map(_stability_note)
+
+    # Ranking is deliberately based on burden + observed CFR with a small-cell
+    # penalty, rather than raw CFR alone.
+    n_score=(strata['Jumlah_Observasi']/max(float(strata['Jumlah_Observasi'].max()),1)*100)
+    cfr_score=(strata['CFR_Persen']/max(float(strata['CFR_Persen'].max()),1)*100)
+    stability_factor=np.where(strata['Jumlah_Observasi']<16,0.35,
+                              np.where(strata['Jumlah_Observasi']<30,0.70,1.0))
+    strata['Prioritas_Sinyal_Score']=(0.50*n_score+0.50*cfr_score)*stability_factor
+    strata['Prioritas_Sinyal_Score']=strata['Prioritas_Sinyal_Score'].round(2)
+    strata=strata.sort_values(
+        ['Prioritas_Sinyal_Score','Jumlah_Observasi','CFR_Persen'],
+        ascending=[False,False,False]
+    ).reset_index(drop=True)
+    strata.insert(0,'Peringkat',np.arange(1,len(strata)+1))
+    strata['Strata_Label']=(
+        'Usia '+strata['Usia'].astype(str)
+        +' × '+strata['Pekerjaan'].astype(str)
+        +' × Komorbid '+strata['Komorbid'].astype(str)
+    )
+    display_cols=['Peringkat','Strata_Label','Usia','Pekerjaan','Komorbid',
+                  'Jumlah_Observasi','Meninggal','CFR_Persen','Stabilitas',
+                  'Prioritas_Sinyal_Score','Interpretasi','Stability_Note']
+    return {
+        'status':'ok',
+        'data':d,
+        'cluster_profile':d.groupby('Vulnerability_Cluster').size().rename('Cases').reset_index(),
+        'vulnerability_strata':strata[display_cols],
+        'top_stratum':strata.iloc[0].to_dict() if not strata.empty else None,
+        'method':'KMeans exploratory clustering + explicit vulnerability stratification',
+        'guardrail':'Observed CFR in small strata is an unstable descriptive signal, not population risk.'
+    }
 
 def prioritize_continuous_signals(anomaly=None,change_points=None,growth=None,neighbor=None):
     """Fuse transparent surveillance signals into an operational queue."""

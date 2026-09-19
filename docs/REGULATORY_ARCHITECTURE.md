@@ -1,16 +1,28 @@
 # SI-HIS Regulatory Architecture
 
-## A. Sistem Informasi Kesehatan
-Population surveillance, epidemiology, forecasting, spatial intelligence and public-health decision support are governed separately from clinical/SaMD modules.
+## 1. Two intelligence planes
+**Population Health / Sistem Informasi Kesehatan** covers surveillance, epidemiology, temporal/spatial analysis, outbreak and poisoning hypothesis generation, forecasting, early warning and public-health decision support.
 
-## B. Clinical / SaMD candidate
-Laboratory, Pharmacy, Dietitian, Clinical Journey and Patient Clinical Summary each have their own intended purpose, risk assessment, clinical validation, safety controls, human factors, change control and regulatory assessment.
+**Individual Health / Clinical Intelligence** covers patient-specific laboratory interpretation, pharmacy safety, nutrition decision support, longitudinal clinical interpretation and other clinical decision support.
 
-## C. No automatic legal classification
-“SaMD candidate” is an engineering/governance designation only. Whether software meets the legal definition/classification of a medical device must be assessed from the exact intended purpose, claims, clinical role, risk and current Indonesian rules.
+When an individual-patient function interprets clinical data and produces or supports a recommendation about diagnosis, treatment, triage, prognosis or another clinical decision, SI-HIS routes it to the **clinical/SaMD candidate boundary**. This is an engineering/governance classification, not a legal determination; exact intended purpose, claims, risk, validation and applicable Indonesian rules require formal assessment.
 
-## D. Interoperability
-FHIR/SATUSEHAT mapping is a separate integration layer. Clinical analytics consume canonical data and should retain source identifiers/provenance.
+## 2. Individual → population → individual
 
-## E. Privacy/security
-PDP, health-sector confidentiality, access control, auditability, data minimization and security controls are cross-cutting but assessed according to the actual deployment.
+Individual clinical data → canonical data → clinical/SaMD candidate analytics and/or controlled aggregation → privacy/purpose/provenance gate → population epidemiology → surveillance/early warning → public-health action → feedback to the clinical journey.
+
+The population layer must not silently become a patient-level clinical decision engine. Population signals may inform targeted investigation or contextual clinical review, but not automatic individual diagnosis or treatment.
+
+## 3. Explicit analysis scope
+
+SI-HIS should carry an explicit `analysis_scope`: `individual` or `population`. The same laboratory source can therefore have two distinct uses:
+- population: aggregate abnormal-result patterns, surveillance indicators, geographic trends;
+- individual: interpretation of a patient's results for diagnostic or treatment decision support, which belongs to the clinical/SaMD candidate boundary.
+
+## 4. Toxicology / poisoning
+
+A suspected foodborne, inhalational or chemical poisoning pattern across multiple people remains an SIK/surveillance function when the output is a hypothesis, differential, cluster signal or investigation priority. If the same engine is applied to one identified patient and produces a patient-specific diagnostic recommendation, it crosses into the clinical/SaMD candidate boundary.
+
+## 5. Interoperability and safety
+
+FHIR/SATUSEHAT is the integration layer, not the regulatory classification. Clinical/SaMD candidate functions require intended-purpose definition, risk management, clinical validation, evidence/provenance traceability, human oversight, change control and post-deployment monitoring. Do not claim legal SaMD compliance merely from this engineering boundary.

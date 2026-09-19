@@ -1133,7 +1133,7 @@ else:
                 render_value(ev.get('unknown_event'),'Unknown Event Detection')
                 render_value(ev.get('uncertainty'),'Uncertainty Intelligence')
                 render_value(orch.get('next_actions'),'Next Actions')
-        show_tab_resume('Resume Machine Learning',ml_expert(result.get('ml'),sel_disease,label),'performa model, feature importance dan hasil ML di bawah')
+        show_tab_resume('Resume Machine Learning',ml_expert(result.get('ml')),'performa model, feature importance dan hasil ML di bawah')
         st.caption('Analisis ML mendukung decision support dan melengkapi analisis epidemiologi, bukan menggantikannya.')
         if include_ml:render_ml_report(result.get('ml'),sel_disease,label)
         else:st.info('ML layer belum diaktifkan. Centang **Aktifkan ML layer** pada Panel Kontrol untuk menjalankan prediction models.')

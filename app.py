@@ -10,7 +10,7 @@ from core.engine import SIHISIntelligenceEngine
 from core.scope import QueryScope
 warnings.filterwarnings('ignore')
 st.set_page_config(page_title='SI-HIS Intelligence',page_icon='🧠',layout='wide')
-st.markdown('''<div style="background:#f0e68c;padding:18px 22px;border-radius:12px;border:2px solid #d4c886;"><h1 style="margin:0;color:#1e3a8a;font-size:1.7rem;">SI-HIS — Smart Integrated Health Intelligence System</h1><p style="margin:6px 0 0;color:#475569;font-weight:600;">Early Detection, Smarter Intervention</p></div>''',unsafe_allow_html=True)
+st.markdown('''<div style="background:#f0e68c;padding:18px 22px;border-radius:12px;border:2px solid #d4c886;"><h1 style="margin:0;color:#1e3a8a;font-size:1.7rem;">SI-HIS — Smart Integrated Health Intelligence System</h1><p style="margin:5px 0 0;color:#334155;font-size:1.05rem;font-weight:700;">Digital Nervous System</p><p style="margin:3px 0 0;color:#475569;font-weight:600;">Mengubah data kesehatan menjadi sinyal, kecerdasan, prediksi, dan keputusan yang dapat ditindaklanjuti.</p><p style="margin:3px 0 0;color:#64748b;font-weight:600;">NutriMed-MyLab — Personal Health & Clinical Journey Layer</p></div>''',unsafe_allow_html=True)
 st.caption(f"🕒 Waktu Sistem: {get_wib_time()['full']}")
 engine=SIHISIntelligenceEngine()
 
@@ -918,8 +918,36 @@ def _render_ml_disease_models(result):
 
 
 def render_ml_report(ml):
-    st.markdown('### 🧠 AI/ML Intelligence Report')
-    st.caption('Seluruh komponen ML/AI SI-HIS ditampilkan. Lima model utama lama tetap dipertahankan, sedangkan komponen epidemiological intelligence tambahan dirender dari hasil backend agar tidak tersembunyi.')
+    st.markdown('### 🧠 SI-HIS Epidemiological Machine Learning Intelligence')
+    st.caption('ML di sini bukan sekadar lima model prediksi. Lapisan ini mencakup deteksi sinyal, perubahan waktu, pertumbuhan kasus, konteks spasial, karakteristik penduduk, prediksi spatio-temporal, model spesifik penyakit, segmentasi kerentanan, forecasting, serta validasi dan pemantauan drift.')
+    st.info('**Cara membaca:** ML menemukan pola yang layak diperiksa lebih lanjut. Epidemiolog menilai konteks TIME + PERSON + PLACE, kualitas data, definisi kasus, kemungkinan bias, dan bukti lapangan sebelum tindakan ditetapkan.')
+    with st.expander('🧭 Peta Kapabilitas ML — 15 Komponen SI-HIS', expanded=True):
+        st.markdown('''
+**A. Predictive & Clinical**
+1. Case Severity Prediction — memperkirakan risiko outcome berat berdasarkan definisi target yang tersedia.
+2. KLB / Outbreak 7-Day Prediction — memperkirakan peningkatan beban kasus 7 hari ke depan menggunakan threshold turunan historis.
+3. Spatial Outbreak Prediction — menggabungkan waktu dan lokasi untuk menentukan area yang perlu diverifikasi.
+
+**B. Epidemiological Signal Intelligence**
+4. Vulnerable Population Prediction — mengidentifikasi karakteristik yang berkaitan dengan outcome rentan; bukan label klinis individu.
+5. Temporal Anomaly Detection — menemukan hari/area yang menyimpang dari pola normalnya.
+6. Change-Point Detection — mendeteksi perubahan pola yang relatif mendadak dibanding baseline bergerak.
+7. Area Growth-Risk — mengidentifikasi area dengan risiko beban kasus meningkat dalam horizon 7 hari.
+8. Continuous Epidemiological Signal Ranking — menggabungkan beberapa sinyal menjadi prioritas screening yang transparan.
+9. Spatial Neighbour Intelligence — membaca konteks kasus di area sekitar berdasarkan koordinat valid.
+
+**C. Advanced Epidemiological Intelligence**
+10. Spatio-Temporal Risk — memadukan TIME + PLACE untuk prediksi beban area.
+11. TIME + PERSON + PLACE Risk — menambahkan karakteristik populasi seperti umur, usia ≥65, komorbid, perjalanan, dan kematian pada area-hari.
+12. Disease-Specific Growth Models — membangun model pertumbuhan secara terpisah untuk setiap penyakit agar pola satu penyakit tidak disamakan dengan penyakit lain.
+13. Population Vulnerability Clustering — mengelompokkan pola karakteristik populasi untuk kebutuhan surveillance.
+
+**D. Forecasting & Model Governance**
+14. Robust Temporal Forecasting — membandingkan beberapa metode forecasting dengan backtest temporal.
+15. Validation & Dataset Drift — menilai kualitas probabilitas dan perubahan distribusi data dari waktu ke waktu.
+
+> **Catatan:** daftar ini adalah peta kapabilitas. Tidak semua komponen akan menghasilkan output pada setiap dataset; jika data, outcome, koordinat, atau seri waktu tidak mencukupi, SI-HIS harus menyatakan keterbatasan tersebut daripada mengarang hasil.
+''')
     if not isinstance(ml,dict) or not ml:
         st.info('ML layer belum dijalankan.')
         return
@@ -942,8 +970,10 @@ def render_ml_report(ml):
     _render_ml_model_card(
         '4. Vulnerable Population Prediction',
         'Memprediksi outcome rentan dari karakteristik person/paparan. Bukan diagnosis individual.',
-        'Karakteristik kelompok mana yang perlu mendapat perhatian surveillance?',
+        'Karakteristik kelompok mana yang menunjukkan pola outcome rentan dan perlu mendapat perhatian surveillance?',
         ml.get('vulnerable'))
+    st.markdown('#### 5. Robust Temporal Forecasting')
+    st.caption('Forecasting memperkirakan pola jumlah kasus ke depan berdasarkan seri waktu yang tersedia. Backtest temporal digunakan untuk menilai kesalahan prediksi; hasil forecast bukan kepastian kejadian.')
     _render_ml_forecast(ml.get('forecast'))
 
     epi=ml.get('epidemiological_intelligence',{})
@@ -1007,10 +1037,10 @@ def render_ml_report(ml):
         st.caption(f'Terdapat {len(signals)} event signal yang dibentuk dari anomaly/change-point. Signal ini memerlukan verifikasi epidemiologis.')
 
     vuln=epi.get('vulnerability_clustering')
-    st.markdown('### 14. Population Vulnerability Clustering')
+    st.markdown('### 13. Population Vulnerability Clustering')
     if isinstance(vuln,dict) and vuln.get('status')=='ok':
         st.caption(f"KMeans clustering menghasilkan {vuln.get('n_clusters','N/A')} cluster berdasarkan fitur populasi yang tersedia. Ini segmentasi surveillance, bukan label klinis.")
-        _render_ml_epi_table('Profil Cluster',vuln.get('profiles'),None,20)
+        _render_ml_epi_table('Profil Cluster',vuln.get('profile',vuln.get('profiles')),None,20)
     else:
         st.warning(vuln.get('message','Clustering belum tersedia.') if isinstance(vuln,dict) else 'Clustering belum tersedia.')
 

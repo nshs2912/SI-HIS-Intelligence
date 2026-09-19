@@ -767,27 +767,26 @@ def _render_ml_model_card(title, purpose, decision_question, result, disease="pe
     if result.get('metrics',{}).get('Narrative'):
         st.info(result['metrics']['Narrative'])
 
-def _render_ml_forecast(result):
-    st.markdown('### 5. Temporal Forecasting')
-    st.markdown('**Fungsi:** memproyeksikan jumlah kasus ke depan untuk membantu membaca kemungkinan beban layanan, kesiapsiagaan, dan arah tren.')
-    st.markdown('**Pertanyaan keputusan:** berapa kisaran kasus yang mungkin terjadi dalam horizon forecast dan kapan puncak model diperkirakan?')
+def _render_ml_forecast(result, disease="penyakit terpilih"):
+    st.markdown(f'### 5. Temporal Forecasting — {disease}')
+    st.markdown(f'**Fungsi:** memproyeksikan jumlah kasus **{disease}** ke depan untuk membantu kesiapsiagaan kapasitas, logistik, dan surveillance.')
+    st.markdown(f'**Pertanyaan keputusan:** jika pola historis berlanjut, bagaimana kisaran beban kasus {disease} pada horizon forecast dan kapan model memperkirakan nilai tertinggi?')
     if not isinstance(result,dict) or result.get('status')!='ok':
-        st.warning(f"Forecast belum tersedia: {result.get('message','Data belum mencukupi.') if isinstance(result,dict) else 'hasil tidak tersedia.'}")
+        st.warning(f"Forecast **{disease}** belum tersedia: {result.get('message','Data belum mencukupi.') if isinstance(result,dict) else 'hasil tidak tersedia.'}")
         return
     m1,m2,m3=st.columns(3)
     m1.metric('Horizon',f"{len(result.get('forecast',[]))} hari")
     m2.metric('Peak forecast',f"{float(result.get('peak_value',0)):.1f} kasus")
     peak=result.get('peak_date');m3.metric('Tanggal peak',pd.to_datetime(peak).strftime('%d %b %Y') if peak is not None else 'N/A')
     st.markdown(f"**Backtest MAE:** {_metric_value(result.get('mae'),2)} | **RMSE:** {_metric_value(result.get('rmse'),2)}")
+    st.markdown('**Cara membaca:** MAE adalah rata-rata besar kesalahan absolut pada backtest; RMSE memberi bobot lebih besar pada kesalahan yang besar. Semakin kecil umumnya semakin baik. Peak forecast adalah titik tertinggi yang diproyeksikan model, bukan kepastian akan terjadi.')
     weights=result.get('weights',{})
     if weights: st.write('Bobot ensemble:',{k:round(float(v),3) for k,v in weights.items()})
-    dates=pd.to_datetime(result.get('dates',[]),errors='coerce')
-    forecast=result.get('forecast',[])
+    dates=pd.to_datetime(result.get('dates',[]),errors='coerce');forecast=result.get('forecast',[])
     if len(dates)==len(forecast) and len(forecast):
-        chart=pd.DataFrame({'Tanggal':dates,'Forecast':forecast}).set_index('Tanggal')
-        st.line_chart(chart)
-    with st.expander('📖 Cara membaca forecasting',expanded=False):
-        st.markdown('Forecast adalah estimasi model, bukan jumlah kasus yang pasti terjadi. MAE/RMSE menggambarkan kesalahan pada backtest; semakin kecil umumnya semakin baik. Puncak forecast adalah nilai tertinggi yang diproyeksikan dalam horizon. Gunakan bersama kurva epidemik, EWS, Rₜ, dan konteks intervensi.')
+        chart=pd.DataFrame({'Tanggal':dates,'Forecast':forecast}).set_index('Tanggal');st.line_chart(chart)
+    with st.expander('📖 Batas interpretasi forecasting',expanded=False):
+        st.markdown(f'Forecast **{disease}** bergantung pada pola historis dan asumsi model. Perubahan pelaporan, intervensi, musim, mobilitas, atau kejadian baru dapat membuat realisasi berbeda. Validasi yang baik memerlukan backtesting temporal berulang dan pemantauan error setelah model berjalan di data baru. Interval pada prototype tidak boleh dianggap sebagai prediction interval epidemiologis yang telah terkalibrasi.')
 
 def _render_signal_table(title, description, result, max_rows=15):
     st.markdown(f'#### {title}')

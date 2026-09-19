@@ -247,8 +247,7 @@ def curve_expert(result, disease):
         lines.append("Forecast belum tersedia atau data belum mencukupi.")
     lines += [
         "",
-        "### 🔬 Penjelasan akademik/praktisi",        "Interpretasi kurva harus mempertimbangkan interval waktu, keterlambatan pelaporan, tanggal onset, perubahan testing, seasonality, serial interval, dan intervensi. "
-        "Forecast sebaiknya dibandingkan dengan baseline sederhana dan dievaluasi secara temporal berulang.",
+        "### 🔬 Penjelasan akademik/praktisi",        "Interpretasi kurva harus mempertimbangkan interval waktu, keterlambatan pelaporan, tanggal onset, perubahan testing, seasonality, serial interval, dan intervensi. "        "Forecast sebaiknya dibandingkan dengan baseline sederhana dan dievaluasi secara temporal berulang.",
         "",
         "### 👥 Penjelasan untuk masyarakat",
         "Kurva adalah **cerita jumlah kasus dari hari ke hari**. Bila garis naik, berarti jumlah kasus yang tercatat bertambah; bila turun, jumlah kasus yang tercatat berkurang. "
@@ -451,7 +450,7 @@ def ml_expert(ml, disease=None, label=None):
                 f"n={int(top.get('Jumlah_Observasi',0))}, CFR={float(top.get('CFR_Persen',0)):.2f}%, "
                 f"stabilitas={top.get('Stabilitas','-')}.",
                 "",
-                "Prioritas tidak ditentukan dari CFR mentah saja. Sistem memberikan penalti pada strata kecil agar CFR tinggi dengan denominator kecil tidak otomatis mendominasi.",
+                "CFR mentah tidak digunakan sebagai dasar tunggal untuk menentukan prioritas. Strata kecil perlu diperlakukan hati-hati karena estimasinya dapat tidak stabil.",
                 "Strata **RENDAH** harus dibaca sebagai sinyal pada dataset, bukan sebagai estimasi risiko populasi. "
                 "Sebagai prinsip kehati-hatian, ukuran kecil dapat menghasilkan ketidakpastian yang besar.",
                 "",
@@ -497,8 +496,7 @@ def ai_prediction_expert(result, disease, label):
     death = _death_series(df)
     deaths = int(death.sum())
     cfr = _pct(deaths,total)    klb = result.get("klb",{}) if isinstance(result,dict) else {}
-    ews = result.get("ews",{}) if isinstance(result,dict) else {}
-    rt = result.get("rt",{}) if isinstance(result,dict) else {}
+    ews = result.get("ews",{}) if isinstance(result,dict) else {}    rt = result.get("rt",{}) if isinstance(result,dict) else {}
     ml = result.get("ml",{}) if isinstance(result,dict) else {}
 
     lines = [
@@ -598,7 +596,7 @@ def vulnerable_expert(v):
             f"dan **CFR {cfr:.2f}%**."
         )
         lines.append(
-            "Profil tersebut tidak disebut sebagai *prioritas tertinggi* karena nilai CFR "
+            "Profil tersebut tidak diberi label sebagai *prioritas tertinggi* karena nilai CFR "
             "dapat terlihat tinggi pada strata dengan jumlah observasi kecil. Besarnya outcome "
             "perlu dibaca bersama ukuran sampel, stabilitas estimasi, dan ketidakpastian statistik."
         )
@@ -622,4 +620,4 @@ def vulnerable_expert(v):
         "dalam kelompok tersebut pasti mengalami kondisi yang sama. Data yang lebih besar dan "
         "verifikasi lapangan diperlukan untuk memastikan apakah pola tersebut konsisten.",
     ]
-    return "\\n".join(lines)
+    return "\n".join(lines)

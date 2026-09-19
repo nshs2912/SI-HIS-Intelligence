@@ -830,12 +830,29 @@ def render_ml_report(ml, disease=None, label=None):
     ci=ml.get('continuous_intelligence',{})
     disease_intel=ml.get('disease_intelligence') or classify_disease(disease).__dict__
     infectious_intel=ml.get('infectious_intelligence')
+    acute_intel=ml.get('acute_event_intelligence') or {}
     st.markdown('#### 🧬 Disease Intelligence Classification')
     c1,c2,c3=st.columns(3)
     c1.metric('Family',str(disease_intel.get('family','UNKNOWN')))
     c2.metric('Subgroup',str(disease_intel.get('subgroup','unknown')))
     c3.metric('Transmission',str(disease_intel.get('transmission','unknown')))
     st.caption('**ML strategy:** '+str(disease_intel.get('primary_ml_focus','generic/validated-outcome'))+' | **Dimensions:** '+str(disease_intel.get('key_dimensions','TIME,PERSON,PLACE')))
+    if isinstance(acute_intel,dict) and acute_intel.get('status')=='signal':
+        st.markdown('#### 🚨 Acute Event / Keracunan Intelligence')
+        st.warning('Terdeteksi sinyal **acute clustered event**. Sistem belum menetapkan apakah ini keracunan, outbreak, atau bencana; lakukan verifikasi lapangan segera.')
+        sig=acute_intel.get('signals',[])
+        if sig: st.write('**Sinyal:** '+', '.join(map(str,sig)))
+        d=acute_intel.get('differential_hypotheses',[])
+        st.write('**Hipotesis diferensial yang perlu diverifikasi:** '+', '.join(map(str,d)))
+        ps=acute_intel.get('point_source',{}) or {}
+        mc=acute_intel.get('mass_casualty_burst',{}) or {}
+        a,b,c3=st.columns(3)
+        a.metric('Kasus dalam window',str(ps.get('cases_in_window','N/A')))
+        b.metric('Burst latest day',str(mc.get('latest_day_cases','N/A')))
+        b3=mc.get('burst_to_baseline_ratio')
+        c3.metric('vs baseline',f'{b3:.1f}×' if isinstance(b3,(int,float)) else 'N/A')
+        st.caption('Guardrail: sinyal ini adalah triase investigasi, bukan diagnosis etiologi atau deklarasi legal KLB/bencana.')
+
     if isinstance(infectious_intel,dict) and infectious_intel.get('enabled'):
         oq=infectious_intel.get('onset_quality',{}) or {}
         ef=infectious_intel.get('epicurve_features',{}) or {}

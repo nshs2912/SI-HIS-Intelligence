@@ -350,17 +350,45 @@ def risk_expert(result):
     return "\n".join(lines)
 
 
-def ml_expert(ml):
+def ml_expert(ml, disease=None, label=None):
+    """Human-readable ML narrative scoped to the selected disease and geographic scope."""
+    disease_name = disease or "penyakit terpilih"
+    scope_name = label or "scope analisis"
     if not isinstance(ml, dict) or not ml:
-        return "### 🤖 RESUME MACHINE LEARNING\n\nML layer belum dijalankan."
+        return f"### 🤖 RESUME MACHINE LEARNING — {disease_name}\n\nML layer belum dijalankan untuk **{disease_name}** pada **{scope_name}**."
+
     primary = ml.get("primary_engines", {})
     ci = ml.get("continuous_intelligence", {})
     lines = [
-        "### 🤖 RESUME MACHINE LEARNING & EPIDEMIOLOGICAL AI",
+        f"### 🤖 RESUME MACHINE LEARNING & EPIDEMIOLOGICAL AI — {disease_name}",
         "",
-        f"SI-HIS memiliki **{len(primary) if isinstance(primary,dict) else 5} primary engine** dan **{len(ci) if isinstance(ci,dict) else 0} supporting intelligence modules**. "
-        "ML digunakan untuk memperkuat surveillance dan decision support; epidemiologi deskriptif tetap menjadi fondasi interpretasi.",
+        f"Analisis ML ini **khusus menggunakan data {disease_name}** pada scope **{scope_name}**. Ketika pengguna mengganti filter penyakit, seluruh model, sinyal, metrik, dan interpretasi pada menu ini harus dibaca ulang berdasarkan kohort penyakit yang baru dipilih.",
+        f"SI-HIS menjalankan **{len(primary) if isinstance(primary,dict) else 5} primary engine** dan **{len(ci) if isinstance(ci,dict) else 0} supporting intelligence modules**. ML memperkuat surveillance dan decision support; analisis epidemiologi TIME + PERSON + PLACE tetap menjadi dasar interpretasi.",
     ]
+
+    explanations = {
+        "case_severity": (
+            f"Untuk {disease_name}, model ini memperkirakan probabilitas outcome keparahan yang didefinisikan sistem pada kasus penyakit tersebut. "
+            "Hasilnya digunakan untuk membantu menentukan kasus yang perlu diprioritaskan untuk pemantauan, bukan untuk menetapkan diagnosis atau keputusan klinis otomatis."
+        ),
+        "klb": (
+            f"Untuk {disease_name}, model mencoba mengenali sinyal peningkatan beban kasus dalam 7 hari berikutnya pada unit wilayah yang dianalisis. "
+            "Target ini merupakan target operasional/model dan **bukan penetapan legal KLB**."
+        ),
+        "spatial": (
+            f"Untuk {disease_name}, model menggabungkan pola temporal dan lokasi geografis untuk mencari wilayah yang perlu diverifikasi lebih dini. "
+            "Prediksi spasial adalah sinyal prioritas dan tidak membuktikan sumber penularan."
+        ),
+        "vulnerable": (
+            f"Untuk {disease_name}, model mencari pola karakteristik person yang berkaitan dengan outcome target sehingga kelompok yang perlu mendapat perhatian surveillance dapat diprioritaskan. "
+            "Profil rentan tidak berarti setiap anggota kelompok tersebut pasti mengalami outcome yang sama."
+        ),
+        "forecast": (
+            f"Forecasting memproyeksikan kecenderungan jumlah kasus **{disease_name}** berdasarkan pola waktu pada data yang difilter. "
+            "Forecast adalah estimasi model dan harus dibandingkan dengan observasi aktual secara berkala."
+        ),
+    }
+
     for key, title in [
         ("case_severity","Severity"),
         ("klb","Outbreak/KLB 7 Hari"),
@@ -369,32 +397,50 @@ def ml_expert(ml):
         ("forecast","Forecasting"),
     ]:
         r = primary.get(key) if isinstance(primary,dict) else None
-        if isinstance(r,dict):
-            status = r.get("status","-")
-            metrics = r.get("metrics",{}) if isinstance(r.get("metrics",{}),dict) else {}
-            lines.append(
-                f"**{title}:** status **{status}**; ROC-AUC **{_fmt(metrics.get('roc_auc'),3)}**, "
-                f"PR-AUC **{_fmt(metrics.get('pr_auc'),3)}**, recall **{_fmt(metrics.get('recall'),3)}**, "
-                f"Brier **{_fmt(metrics.get('brier'),3)}**."
+        if not isinstance(r,dict):
+            continue
+        status = str(r.get("status","-")).lower()
+        metrics = r.get("metrics",{}) if isinstance(r.get("metrics",{}),dict) else {}
+        if key == "forecast":
+            lines.append(f"**{title}:** status **{r.get('status','-')}**. {explanations[key]}")
+            if r.get("mae") is not None:
+                lines.append(f"MAE backtest sekitar **{_fmt(r.get('mae'),3)}**; semakin kecil error absolut, semakin dekat prediksi model dengan observasi pada backtest. Evaluasi forecasting tidak menggunakan ROC-AUC/PR-AUC/recall/Brier sebagai metrik utama.")
+        else:
+            roc = metrics.get("roc_auc")
+            pr = metrics.get("pr_auc")
+            recall = metrics.get("recall")
+            brier = metrics.get("brier")
+            metric_text = (
+                f"ROC-AUC **{_fmt(roc,3)}**, PR-AUC **{_fmt(pr,3)}**, "
+                f"recall **{_fmt(recall,3)}**, Brier **{_fmt(brier,3)}**."
             )
+            if status == "error":
+                metric_text += " Karena status model **error**, angka 0,000 atau nilai kosong pada metrik tidak boleh ditafsirkan sebagai performa model nol; evaluasi belum valid dan perlu diperiksa pada data/label."
+            else:
+                recall_value = float(recall) if recall is not None and pd.notna(recall) else None
+                metric_text += (
+                    f" Recall sebesar **{recall_value*100:.1f}%** berarti model menemukan sekitar {recall_value*100:.1f}% "
+                    "dari kasus positif/target pada data uji, sehingga kasus target yang terlewat masih perlu diperhatikan."
+                    if recall_value is not None else ""
+                )
+            lines.append(f"**{title}:** status **{r.get('status','-')}**. {explanations[key]} {metric_text}")
+
     lines += [
         "",
-        "### 🔬 Untuk akademisi/praktisi",
-        "Metrik tidak boleh dibaca sebagai satu angka kemenangan model. **ROC-AUC** menggambarkan kemampuan diskriminasi secara umum, "
-        "**PR-AUC** lebih informatif ketika outcome positif jarang, **recall** menunjukkan sensitivitas terhadap kasus positif, **specificity** menunjukkan kemampuan menyaring non-target, "
-        "sedangkan **Brier score** menilai kualitas probabilitas. Validasi temporal dan eksternal diperlukan.",
-        "Feature importance menunjukkan kontribusi prediktif dalam model, **bukan kausalitas**. Model dengan performa tinggi tetap dapat bias bila data training tidak mewakili populasi operasional.",
+        "### 📖 Cara membaca angka ML dengan bahasa sederhana",
+        "**ROC-AUC** menggambarkan kemampuan model membedakan kelompok target dan non-target secara keseluruhan; nilainya makin mendekati 1 menunjukkan diskriminasi yang makin baik pada data uji. **PR-AUC** melihat kualitas deteksi kelompok positif dengan memperhatikan precision dan recall, sehingga penting ketika kasus target relatif jarang. **Recall** menjawab pertanyaan: dari semua kasus target yang benar-benar ada, berapa persen yang berhasil ditemukan model. **Brier score** menilai seberapa baik probabilitas prediksi dibandingkan outcome aktual; semakin kecil umumnya semakin baik. Angka-angka ini harus dibaca bersama distribusi kelas, ukuran sampel, dan validasi temporal.",
         "",
-        "### 👥 Untuk masyarakat",
-        "AI di sini berfungsi seperti **alat bantu membaca pola**. AI dapat memberi sinyal bahwa suatu wilayah atau kelompok perlu diperiksa lebih cepat, "
-        "tetapi sinyal tersebut tetap perlu dikonfirmasi oleh manusia dan data lapangan.",
+        "### 🔬 Interpretasi epidemiologis",
+        f"Semua keluaran ML di atas harus dipahami sebagai **sinyal untuk {disease_name}**, bukan sebagai kesimpulan yang berlaku untuk semua penyakit. Perubahan hasil ketika filter penyakit diganti adalah hal yang diharapkan karena model menerima kohort, pola waktu, karakteristik person, distribusi wilayah, dan outcome penyakit yang berbeda.",
+        "Feature importance menunjukkan kontribusi prediktif dalam model, bukan bukti bahwa suatu faktor menyebabkan penyakit. Cluster spasial menunjukkan konsentrasi berdasarkan algoritma dan parameter yang digunakan, bukan otomatis sumber penularan.",
+        "",
+        "### 👥 Untuk praktisi dan pengambil keputusan",
+        f"Gunakan hasil ML {disease_name} bersama kurva epidemik, Rₜ, EWS, TIME + PERSON + PLACE, distribusi spasial, outcome, dan hasil investigasi lapangan. Jika beberapa sinyal konsisten, wilayah/kasus tersebut dapat diprioritaskan untuk verifikasi; keputusan akhir tetap berada pada tenaga kesehatan dan otoritas yang berwenang.",
         "",
         "### ⚠️ Kesiapan operasional",
-        "Sebelum produksi diperlukan calibration monitoring, drift monitoring, model/version registry, external validation, audit trail, dan pembaruan label dari outcome nyata."
+        "Model yang berstatus error harus diperbaiki sebelum digunakan. Model yang berstatus OK tetap memerlukan calibration monitoring, data/model drift monitoring, external validation, version registry, audit trail, dan pembaruan label berdasarkan outcome nyata.",
     ]
     return "\n".join(lines)
-
-
 def ai_prediction_expert(result, disease, label):
     df = result.get("analysis_dataframe") if isinstance(result,dict) else None
     if not isinstance(df,pd.DataFrame) or df.empty:

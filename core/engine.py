@@ -7,6 +7,9 @@ regulatory surveillance ruleset and never declares legal KLB status itself.
 """
 from __future__ import annotations
 from dataclasses import dataclass
+from collections import OrderedDict
+import hashlib
+import copy
 from typing import Any
 import numpy as np
 import pandas as pd
@@ -122,6 +125,17 @@ def _outcome_analysis(cohort,target,name,question):
     return {"available":True,"outcome":name,"question":question,"n":len(work),"events":int(work["_Outcome"].sum()),"event_rate_pct":round(float(work["_Outcome"].mean()*100),2),"analysis":result}
 
 
+_ML_RESULT_CACHE = OrderedDict()
+_ML_CACHE_MAXSIZE = 8
+
+def _ml_cache_key(df):
+    """Create a content-based cache key without changing the analytical dataset."""
+    cols = list(df.columns)
+    h = hashlib.sha256()
+    h.update("|".join(map(str, cols)).encode("utf-8"))
+    h.update(pd.util.hash_pandas_object(df, index=True).values.tobytes())
+    return h.hexdigest()
+
 class IntelligenceEngine:
     def prepare(self,df,scope=None):
         query_scope=(scope or QueryScope()).normalized();scoped=apply_scope(df,query_scope);return IntelligenceResult(query_scope,scoped,{"engine":"SI-HIS Intelligence","scope":query_scope.to_dict(),"scope_isolated":True,"source_rows":len(df),"scoped_rows":len(scoped),"area":scope_label(query_scope)})
@@ -178,6 +192,16 @@ class IntelligenceEngine:
         return common
 
     def ml_train(self,df):
+        # Performance optimization only: identical analytical input reuses the
+        # exact same ML result. No rows, fields, algorithms, targets, or metrics
+        # are changed. A new/changed dataset produces a new cache key and is
+        # recomputed automatically.
+        cache_key=_ml_cache_key(df)
+        cached=_ML_RESULT_CACHE.get(cache_key)
+        if cached is not None:
+            _ML_RESULT_CACHE.move_to_end(cache_key)
+            return copy.deepcopy(cached)
+
         daily=analyze_trias(df)["time"]
         anomaly=temporal_anomaly_detection(df)
         changes=temporal_change_points(df)
@@ -193,11 +217,16 @@ class IntelligenceEngine:
         spatial=train_spatial_outbreak(df)
         vulnerable=train_vulnerable_population(df)
         forecast=robust_forecast(daily,14)
-        return {
+        result={
             "primary_engines": {"case_severity":severity,"klb":klb,"spatial":spatial,"vulnerable":vulnerable,"forecast":forecast},
             "case_severity":severity,"klb":klb,"spatial":spatial,"vulnerable":vulnerable,"forecast":forecast,
             "continuous_intelligence": {"temporal_anomaly":anomaly,"change_points":changes,"growth_risk":growth,"spatial_neighbor":neighbor,"vulnerability_clustering":vulnerability,"spatiotemporal_risk":spatiotemporal,"time_person_place_risk":tpp,"disease_specific_growth":disease_growth,"signal_prioritization":continuous},
             "architecture": {"primary_engine_count":5,"supporting_signal_modules":9,"loop":"DATA → ANALYSIS → PREDICTION → PRESCRIPTION → NEW DATA → CONTINUOUS LEARNING"}
         }
+        _ML_RESULT_CACHE[cache_key]=copy.deepcopy(result)
+        _ML_RESULT_CACHE.move_to_end(cache_key)
+        while len(_ML_RESULT_CACHE)>_ML_CACHE_MAXSIZE:
+            _ML_RESULT_CACHE.popitem(last=False)
+        return copy.deepcopy(result)
 
 SIHISIntelligenceEngine=IntelligenceEngine

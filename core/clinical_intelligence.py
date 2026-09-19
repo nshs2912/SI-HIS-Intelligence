@@ -5,7 +5,7 @@ from .dietitian_intelligence import dietitian_intelligence
 from .clinical_journey_intelligence import clinical_journey_intelligence
 from .patient_summary import summarize_patient
 from .regulatory_boundary import regulatory_inventory
-from .evidence_safety import safety_gate
+from .evidence_safety import safety_gate\nfrom .fhir_canonical import canonical_mapping
 
 class ClinicalIntelligenceEngine:
     """Non-epidemiological clinical intelligence boundary.
@@ -20,6 +20,6 @@ class ClinicalIntelligenceEngine:
         elif domain=="dietitian": result=dietitian_intelligence(df)
         elif domain=="clinical_journey": result=clinical_journey_intelligence(df, kwargs.get("patient_id"))
         elif domain=="patient_summary": result=summarize_patient(df, kwargs["context"])
-        elif domain=="regulatory_inventory": result=regulatory_inventory()
+        elif domain=="fhir_mapping": result=canonical_mapping(kwargs.get("module"))\n        elif domain=="regulatory_inventory": result=regulatory_inventory()
         else: raise ValueError(f"Unknown clinical domain: {domain}")
         return safety_gate(result)

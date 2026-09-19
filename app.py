@@ -4,13 +4,14 @@ import numpy as np
 import pandas as pd
 import streamlit as st
 from streamlit_folium import st_folium
-from core.analytics import REQUIRED_COLUMNS, generate_excel_template, generate_data_simulasi, get_wib_time
+from core.analytics import REQUIRED_COLUMNS, generate_excel_template, get_wib_time
+from core.data_provider import get_source_catalog, load_source
 from core.downloads import build_evaluation_excel, build_evaluation_csv, build_resume_pdf, data_sha256
 from core.engine import SIHISIntelligenceEngine
 from core.scope import QueryScope
 warnings.filterwarnings('ignore')
-st.set_page_config(page_title='SI-HIS Intelligence',page_icon='🧠',layout='wide')
-st.markdown('''<div style="background:#f0e68c;padding:18px 22px;border-radius:12px;border:2px solid #d4c886;"><h1 style="margin:0;color:#1e3a8a;font-size:1.7rem;">SI-HIS — Smart Integrated Health Intelligence System</h1><p style="margin:6px 0 0;color:#475569;font-weight:600;">Early Detection, Smarter Intervention</p></div>''',unsafe_allow_html=True)
+st.set_page_config(page_title='SI-HIS — Continuous Health Intelligence',page_icon='🧠',layout='wide')
+st.markdown('''<div style="padding:26px 30px 24px;border-radius:16px;border:1px solid #cbd5e1;background:linear-gradient(135deg,#f8fafc 0%,#eef6ff 100%);box-shadow:0 4px 18px rgba(15,23,42,.06);"><div style="font-size:.92rem;letter-spacing:.12em;text-transform:uppercase;color:#64748b;font-weight:700;">SI-HIS</div><h1 style="margin:4px 0 2px;color:#0f172a;font-size:2.05rem;">Smart Integrated Health Intelligence System</h1><div style="font-size:1.25rem;color:#1d4ed8;font-weight:800;margin-top:14px;">CONTINUOUS HEALTH INTELLIGENCE ENGINE</div><div style="margin-top:7px;color:#475569;font-weight:600;">Data → Intelligence → Prediction → Prescription → Outcome → New Data → Continuous Learning</div><div style="height:1px;background:#cbd5e1;margin:20px 0 17px;"></div><div style="font-size:.95rem;letter-spacing:.08em;text-transform:uppercase;color:#64748b;font-weight:700;">Powered by SI-HIS</div><div style="font-size:1.35rem;color:#0f172a;font-weight:800;margin-top:3px;">NutriMed MyLab</div><div style="font-size:1.02rem;color:#334155;font-weight:700;margin-top:3px;">Personal Health Companion &amp; Longitudinal Health Journey</div><div style="margin-top:12px;color:#475569;font-style:italic;">From Individual Health to Population Health — and Back.</div></div>''',unsafe_allow_html=True)
 st.caption(f"🕒 Waktu Sistem: {get_wib_time()['full']}")
 engine=SIHISIntelligenceEngine()
 
@@ -793,15 +794,38 @@ def render_ml_report(ml):
     st.markdown('### 📌 Cara Membaca Hasil ML secara Keseluruhan')
     st.markdown('1. **Mulai dari target:** pahami apa yang sebenarnya diprediksi.\n2. **Lihat holdout temporal:** jangan hanya melihat training performance.\n3. **Perhatikan PR-AUC, recall, precision, specificity dan Brier**, terutama bila outcome positif jarang.\n4. **Baca feature importance sebagai sinyal prediktif**, bukan faktor penyebab.\n5. **Hubungkan prediction dengan TIME + PERSON + PLACE dan outcome epidemiologis** sebelum membuat keputusan.\n6. **Validasi eksternal diperlukan** sebelum model digunakan sebagai dasar keputusan operasional.')
 
-st.sidebar.header('⚙️ Panel Kontrol & Filter');source=st.sidebar.radio('Sumber Data',['Gunakan Data Simulasi (AI-Ready)','Upload File Excel/CSV Custom'])
-if source.startswith('Gunakan'):df_raw=generate_data_simulasi().copy();st.sidebar.success(f'✅ {len(df_raw):,} data dimuat.')
+st.sidebar.header('⚙️ Panel Kontrol & Filter')
+source_options=get_source_catalog()
+source_labels={item['label']:item['source_id'] for item in source_options}
+source_label=st.sidebar.radio('Sumber Data',['🧪 Data Dummy / Synthetic Nasional','🏥 Data Faktual / Operational Integration'])
+if source_label.startswith('🧪'):
+    source_id='dummy'
+    df_raw,source_metadata=load_source('dummy')
+    uploaded=None
+    st.sidebar.success(f"✅ {len(df_raw):,} data sintetis dimuat.")
+    st.sidebar.caption('Mode presentasi/development. Tidak merepresentasikan pasien nyata.')
 else:
-    uploaded=st.sidebar.file_uploader('Upload File Kasus',type=['xlsx','csv'])
-    if uploaded is None:st.info('Upload file kasus untuk memulai.');st.stop()
-    try:df_raw=pd.read_csv(uploaded) if uploaded.name.lower().endswith('.csv') else pd.read_excel(uploaded)
-    except Exception as exc:st.error(f'Error membaca file: {exc}');st.stop()
-    missing=[c for c in REQUIRED_COLUMNS if c not in df_raw.columns]
-    if missing:st.error(f'Kolom wajib kurang: {missing}');st.stop()
+    factual_choices=[item for item in source_options if item['category']=='factual']
+    factual_labels=[item['label'] for item in factual_choices]
+    selected_factual=st.sidebar.selectbox('Jenis Sumber Faktual',factual_labels)
+    source_id=source_labels[selected_factual]
+    st.sidebar.caption('Prototype transport: upload CSV/Excel. Saat operasional, adapter sumber dapat diganti API/database/FHIR tanpa mengubah intelligence engine.')
+    uploaded=st.sidebar.file_uploader('Upload Data Faktual',type=['xlsx','csv'])
+    if uploaded is None:
+        st.info('Pilih jenis sumber faktual lalu upload CSV/Excel untuk simulasi integrasi. Pada tahap operasional, bagian ini digantikan connector/adaptor sumber.')
+        st.stop()
+    try:
+        df_raw,source_metadata=load_source(source_id,factual_file=uploaded)
+    except Exception as exc:
+        st.error(f'Error membaca data faktual: {exc}')
+        st.stop()
+    missing=source_metadata.get('missing_canonical_columns',[])
+    if missing:
+        st.error(f'Kolom canonical SI-HIS belum lengkap: {missing}')
+        st.info('Gunakan Template_Data_Surveilans.xlsx atau mapping adapter sumber. Field yang belum tersedia dapat dipetakan oleh tim IT pada ingestion layer.')
+        st.stop()
+    st.sidebar.success(f"✅ {len(df_raw):,} data faktual dimuat dari {selected_factual}.")
+    st.sidebar.caption('Sumber tercatat sebagai FACTUAL; provenance source_id disimpan pada metadata runtime.')
 try:st.sidebar.download_button('📥 Download Template Excel Standard',generate_excel_template(),'Template_Data_Surveilans.xlsx','application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',use_container_width=True)
 except Exception:pass
 st.sidebar.markdown('---');st.sidebar.subheader('📍 Filter Analisis Epidemiologi');provinces=sorted(df_raw['Provinsi'].dropna().astype(str).unique()) if 'Provinsi' in df_raw else [];sel_prov=st.sidebar.selectbox('1. Provinsi',['Semua Provinsi']+provinces);dfp=df_raw if sel_prov=='Semua Provinsi' else df_raw[df_raw['Provinsi'].astype(str).eq(sel_prov)];districts=sorted(dfp['Kabupaten'].dropna().astype(str).unique()) if 'Kabupaten' in dfp else [];sel_kab=st.sidebar.selectbox('2. Kabupaten/Kota',['Semua Kabupaten/Kota']+districts);dfk=dfp if sel_kab=='Semua Kabupaten/Kota' else dfp[dfp['Kabupaten'].astype(str).eq(sel_kab)];disease_values=set()
@@ -825,7 +849,7 @@ else:
         analyzed_df=result.get('analysis_dataframe')
         if not isinstance(analyzed_df,pd.DataFrame) or analyzed_df.empty:
             analyzed_df=df_raw.copy()
-        export_meta=build_export_metadata(analyzed_df,sel_disease,label,'Simulasi' if source.startswith('Gunakan') else getattr(uploaded,'name','Upload'),sel_prov,sel_kab,sel_kec,sel_desa,sel_pusk)
+        export_meta=build_export_metadata(analyzed_df,sel_disease,label,source_metadata.get('source_id','unknown') if source_metadata.get('source_mode')=='FACTUAL' else 'DEMO-SYNTHETIC',sel_prov,sel_kab,sel_kec,sel_desa,sel_pusk)
         pdf_bytes=build_resume_pdf(f'SI-HIS Resume Epidemiologi — {sel_disease}',resume_text,export_meta)
         xlsx_bytes=build_evaluation_excel(analyzed_df,export_meta)
         csv_bytes=build_evaluation_csv(analyzed_df)

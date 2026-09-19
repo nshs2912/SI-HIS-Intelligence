@@ -178,7 +178,7 @@ class IntelligenceEngine:
         elif prepared.scope.district:geographic_level="Kabupaten"
         elif prepared.scope.province:geographic_level="Provinsi"
         else:geographic_level="Indonesia"
-        eligibility=validate_scope_for_special_analysis(work,disease,geographic_level,10,14);profile=resolve_disease_profile(disease);disease_intel=classify_disease(disease);infectious_intel=build_infectious_intelligence(work,disease);acute_event_intel=poisoning_vs_disaster_signal(work);toxicology_intel=toxicology_differential(work)
+        eligibility=validate_scope_for_special_analysis(work,disease,geographic_level,10,14);profile=resolve_disease_profile(disease);disease_intel=classify_disease(disease);infectious_intel=build_infectious_intelligence(work,disease);acute_event_enabled=(disease_intel.family=='UNKNOWN' or disease_intel.subgroup in {'direct/indirect'});acute_event_intel=poisoning_vs_disaster_signal(work) if acute_event_enabled else {'enabled':False,'reason':f'Acute Event / Keracunan Intelligence tidak relevan untuk profil {disease_intel.subgroup}.'};toxicology_intel=toxicology_differential(work) if acute_event_enabled else {'enabled':False,'reason':f'Toxicology Intelligence tidak relevan untuk profil {disease_intel.subgroup}.'}
         incident_v2=incident_reasoning_v2(work)
         # For communicable diseases, onset is the epidemiological clock when it is available.
         # The original service/examination date is preserved for data-quality review.
@@ -213,6 +213,8 @@ class IntelligenceEngine:
             _ML_RESULT_CACHE.move_to_end(cache_key)
             return copy.deepcopy(cached)
 
+        profile=classify_disease(disease)
+        acute_event_enabled=(profile.family=='UNKNOWN' or profile.subgroup in {'direct/indirect'})
         daily=analyze_trias(df)["time"]
         anomaly=temporal_anomaly_detection(df)
         changes=temporal_change_points(df)
@@ -232,8 +234,8 @@ class IntelligenceEngine:
             "primary_engines": {"case_severity":severity,"klb":klb,"spatial":spatial,"vulnerable":vulnerable,"forecast":forecast},
             "case_severity":severity,"klb":klb,"spatial":spatial,"vulnerable":vulnerable,"forecast":forecast,
             "continuous_intelligence": {"temporal_anomaly":anomaly,"change_points":changes,"growth_risk":growth,"spatial_neighbor":neighbor,"vulnerability_clustering":vulnerability,"spatiotemporal_risk":spatiotemporal,"time_person_place_risk":tpp,"disease_specific_growth":disease_growth,"signal_prioritization":continuous},
-            "disease_intelligence": classify_disease(disease).__dict__ if disease else None,"infectious_intelligence": build_infectious_intelligence(df,disease) if disease else None,"acute_event_intelligence": poisoning_vs_disaster_signal(df), "toxicology_intelligence": toxicology_differential(df),
-            "intelligence_orchestration": orchestrate_intelligence(df,disease,poisoning_vs_disaster_signal(df),build_infectious_intelligence(df,disease) if disease else None,{"primary_engines":{"case_severity":severity,"klb":klb,"spatial":spatial,"vulnerable":vulnerable,"forecast":forecast}}),
+            "disease_intelligence": profile.__dict__ if disease else None,"infectious_intelligence": build_infectious_intelligence(df,disease) if disease else None,"acute_event_intelligence": poisoning_vs_disaster_signal(df) if acute_event_enabled else {"enabled":False,"reason":f"Acute Event / Keracunan Intelligence tidak relevan untuk profil {profile.subgroup}."}, "toxicology_intelligence": toxicology_differential(df) if acute_event_enabled else {"enabled":False,"reason":f"Toxicology Intelligence tidak relevan untuk profil {profile.subgroup}."},
+            "intelligence_orchestration": orchestrate_intelligence(df,disease,poisoning_vs_disaster_signal(df) if acute_event_enabled else {"enabled":False},build_infectious_intelligence(df,disease) if disease else None,{"primary_engines":{"case_severity":severity,"klb":klb,"spatial":spatial,"vulnerable":vulnerable,"forecast":forecast}}),
             "architecture": {"primary_engine_count":5,"supporting_signal_modules":9,"loop":"DATA → ANALYSIS → PREDICTION → PRESCRIPTION → NEW DATA → CONTINUOUS LEARNING"}
         }
         _ML_RESULT_CACHE[cache_key]=copy.deepcopy(result)

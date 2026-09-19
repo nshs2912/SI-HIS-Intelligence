@@ -1164,16 +1164,6 @@ def render_ml_report(ml, disease=None, label=None):
         st.markdown('**DATA → ANALYSIS → PREDICTION → RECOMMENDATION → INTERVENTION → OUTCOME → NEW DATA → RE-ANALYSIS → CONTINUOUS LEARNING**')
 
 
-
-if corporate_mode:
-    st.markdown('---')
-    render_workforce_dashboard(df_raw, 'Corporate Workforce')
-
-if provider_mode:
-    st.markdown('---')
-    render_provider_dashboard(df_raw, provider_type)
-
-st.caption('SI-HIS Intelligence — epidemiological decision-support with TIME + PERSON + PLACE.')
 st.sidebar.header('⚙️ Panel Kontrol & Filter')
 source_options=get_source_catalog()
 source_labels={item['label']:item['source_id'] for item in source_options}
@@ -1215,6 +1205,14 @@ sel_disease=st.sidebar.selectbox('3. Diagnosis Penyakit',['Semua Penyakit']+sort
 with st.sidebar.expander('Drill-down wilayah (opsional)'):
     kecs=sorted(dfk['Kecamatan'].dropna().astype(str).unique()) if 'Kecamatan' in dfk else [];sel_kec=st.selectbox('Kecamatan',['Semua Kecamatan']+kecs);dbase=dfk if sel_kec=='Semua Kecamatan' else dfk[dfk['Kecamatan'].astype(str).eq(sel_kec)];villages=sorted(dbase['Desa/Kelurahan'].dropna().astype(str).unique()) if 'Desa/Kelurahan' in dbase else [];sel_desa=st.selectbox('Desa/Kelurahan',['Semua Desa/Kelurahan']+villages);vbase=dbase if sel_desa=='Semua Desa/Kelurahan' else dbase[dbase['Desa/Kelurahan'].astype(str).eq(sel_desa)];pusk=sorted(vbase['Puskesmas'].dropna().astype(str).unique()) if 'Puskesmas' in vbase else [];sel_pusk=st.selectbox('Puskesmas',['Semua Puskesmas']+pusk)
 include_ml=st.sidebar.checkbox('Aktifkan ML layer',False);corporate_mode=st.sidebar.checkbox('🏢 Workforce Health Intelligence',False);provider_mode=st.sidebar.checkbox('🏥 Healthcare Provider Intelligence',False);provider_type=st.sidebar.selectbox('Jenis Fasyankes',list(PROVIDER_TYPES.keys())) if provider_mode else 'Rumah Sakit';scope=QueryScope(province=None if sel_prov=='Semua Provinsi' else sel_prov,district=None if sel_kab=='Semua Kabupaten/Kota' else sel_kab,kecamatan=None if sel_kec=='Semua Kecamatan' else sel_kec,village=None if sel_desa=='Semua Desa/Kelurahan' else sel_desa,puskesmas=None if sel_pusk=='Semua Puskesmas' else sel_pusk,disease=None if sel_disease=='Semua Penyakit' else sel_disease,period_days=3650)
+
+if corporate_mode:
+    st.markdown('---')
+    render_workforce_dashboard(df_raw, 'Corporate Workforce')
+if provider_mode:
+    st.markdown('---')
+    render_provider_dashboard(df_raw, provider_type)
+
 if sel_disease=='Semua Penyakit':
     result=engine.descriptive(dfk);label=sel_kab if sel_kab!='Semua Kabupaten/Kota' else (sel_prov if sel_prov!='Semua Provinsi' else 'Indonesia');st.markdown(f'## 📊 Analisis Deskriptif — {label}');ov=result['overview'];a,b=st.columns(2);a.metric('Total Kunjungan Pasien',f"{ov['total_cases']:,}");b.metric('Kasus Meninggal',f"{ov['deaths']:,}");st.markdown('### Resume Epidemiologi');show_resume(descriptive_expert(result,label));st.markdown('### 🏆 10 Besar Penyakit');show_resume('Tabel ini menunjukkan penyakit dengan beban kasus terbesar dalam scope yang dipilih. Jumlah kasus menggambarkan beban absolut; CFR menggambarkan proporsi kematian di antara kasus dan tidak boleh ditafsirkan sebagai mortality rate populasi tanpa denominator yang sesuai.');render_value(result['top10_diseases']);st.markdown('### Distribusi');show_resume('Distribusi berikut memperlihatkan komposisi kasus menurut penyakit, jenis kelamin, kelompok umur, provinsi, dan kabupaten/kota. Perbedaan jumlah kasus adalah temuan deskriptif dan tidak otomatis menunjukkan perbedaan risiko.');render_value(result['disease_distribution']);render_value(result['sex_distribution'],'Jenis Kelamin');render_value(result['age_distribution'],'Kelompok Umur');render_value(result['province_distribution'],'Provinsi');render_value(result['district_distribution'].head(50),'Kabupaten/Kota')
 else:

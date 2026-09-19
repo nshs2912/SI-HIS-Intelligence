@@ -736,14 +736,28 @@ def _render_ml_model_card(title, purpose, decision_question, result, disease="pe
     m8.metric('Accuracy',_metric_value(metrics.get('accuracy')))
     recall=metrics.get('recall');spec=metrics.get('specificity');pr=metrics.get('pr_auc');brier=metrics.get('brier')
     st.markdown('#### 📖 Arti metrik — bahasa sederhana')
-    st.markdown(
-        f"**Recall = {_metric_value(recall)}:** dari semua kasus yang **benar-benar memiliki outcome target**, berapa proporsi yang berhasil ditemukan model. "
-        f"Jadi recall {_metric_value(recall)} berarti sekitar **{float(recall)*100:.1f}% kasus target tertangkap**, sedangkan sisanya dapat terlewat. "
-        f"**Specificity = {_metric_value(spec)}:** dari semua kasus yang **sebenarnya bukan target**, berapa proporsi yang berhasil dikenali sebagai bukan target. "
-        f"Specificity {_metric_value(spec)} berarti sekitar **{float(spec)*100:.1f}% non-target tersaring dengan benar**. "
-        f"**PR-AUC = {_metric_value(pr)}:** merangkum kualitas deteksi target dengan mempertimbangkan precision dan recall; sangat relevan ketika target relatif jarang. "
-        f"**Brier = {_metric_value(brier)}:** menilai seberapa dekat probabilitas prediksi dengan outcome aktual; pada skala ini **semakin kecil umumnya semakin baik**."
-    ) if all(v is not None and pd.notna(v) for v in [recall,spec,pr,brier]) else st.caption('Sebagian metrik tidak tersedia; interpretasi hanya diberikan untuk nilai yang valid.')
+    metric_values=[recall,spec,pr,brier]
+    if all(v is not None and pd.notna(v) for v in metric_values):
+        recall_pct=float(recall)*100
+        spec_pct=float(spec)*100
+        st.markdown(
+            "**Recall = " + _metric_value(recall) + ":** dari semua kasus yang **benar-benar memiliki outcome target**, "
+            "berapa proporsi yang berhasil ditemukan model. Jadi sekitar **" + f"{recall_pct:.1f}" + "% kasus target tertangkap**."
+        )
+        st.markdown(
+            "**Specificity = " + _metric_value(spec) + ":** dari semua kasus yang **sebenarnya bukan target**, "
+            "berapa proporsi yang berhasil dikenali sebagai bukan target. Jadi sekitar **" + f"{spec_pct:.1f}" + "% non-target tersaring dengan benar**."
+        )
+        st.markdown(
+            "**PR-AUC = " + _metric_value(pr) + ":** merangkum kualitas deteksi target dengan mempertimbangkan precision dan recall; "
+            "sangat relevan ketika target relatif jarang."
+        )
+        st.markdown(
+            "**Brier = " + _metric_value(brier) + ":** menilai seberapa dekat probabilitas prediksi dengan outcome aktual; "
+            "pada skala ini **semakin kecil umumnya semakin baik**."
+        )
+    else:
+        st.caption('Sebagian metrik tidak tersedia; interpretasi hanya diberikan untuk nilai yang valid.')
     st.markdown('#### 🔬 Interpretasi praktis')
     if recall is not None and spec is not None and pd.notna(recall) and pd.notna(spec):
         if float(recall)<float(spec):

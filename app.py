@@ -1,4 +1,13 @@
-from core.narrative import descriptive_expert, epidemiology_expert, curve_expert, spatial_expert, risk_expert, ml_expert, ai_prediction_expert, vulnerable_expert
+from core.narrative import (
+    descriptive_expert,
+    epidemiology_expert,
+    curve_expert,
+    spatial_expert,
+    risk_expert,
+    ml_expert,
+    ai_prediction_expert,
+    vulnerable_expert,
+)
 import warnings
 import folium
 import numpy as np

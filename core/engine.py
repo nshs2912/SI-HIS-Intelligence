@@ -203,7 +203,7 @@ class IntelligenceEngine:
         # exact same ML result. No rows, fields, algorithms, targets, or metrics
         # are changed. A new/changed dataset produces a new cache key and is
         # recomputed automatically.
-        cache_key=_ml_cache_key(df)
+        cache_key=_ml_cache_key(df) + "|" + str(disease or "")
         cached=_ML_RESULT_CACHE.get(cache_key)
         if cached is not None:
             _ML_RESULT_CACHE.move_to_end(cache_key)

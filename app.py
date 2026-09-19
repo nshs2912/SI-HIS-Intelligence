@@ -9,6 +9,7 @@ from core.analytics import REQUIRED_COLUMNS, generate_excel_template, get_wib_ti
 from core.data_provider import get_source_catalog, load_source
 from core.downloads import build_evaluation_excel, build_evaluation_csv, build_resume_pdf, data_sha256
 from core.engine import SIHISIntelligenceEngine
+from core.disease_intelligence import classify_disease
 from core.scope import QueryScope
 warnings.filterwarnings('ignore')
 st.set_page_config(page_title='SI-HIS — Continuous Health Intelligence',page_icon='🧠',layout='wide')
@@ -827,6 +828,24 @@ def render_ml_report(ml, disease=None, label=None):
 
     arch=ml.get('architecture',{})
     ci=ml.get('continuous_intelligence',{})
+    disease_intel=ml.get('disease_intelligence') or classify_disease(disease).__dict__
+    infectious_intel=ml.get('infectious_intelligence')
+    st.markdown('#### 🧬 Disease Intelligence Classification')
+    c1,c2,c3=st.columns(3)
+    c1.metric('Family',str(disease_intel.get('family','UNKNOWN')))
+    c2.metric('Subgroup',str(disease_intel.get('subgroup','unknown')))
+    c3.metric('Transmission',str(disease_intel.get('transmission','unknown')))
+    st.caption('**ML strategy:** '+str(disease_intel.get('primary_ml_focus','generic/validated-outcome'))+' | **Dimensions:** '+str(disease_intel.get('key_dimensions','TIME,PERSON,PLACE')))
+    if isinstance(infectious_intel,dict) and infectious_intel.get('enabled'):
+        oq=infectious_intel.get('onset_quality',{}) or {}
+        ef=infectious_intel.get('epicurve_features',{}) or {}
+        ci1,ci2=st.columns(2)
+        ci1.metric('Onset completeness',f"{oq.get('onset_completeness_pct',0):.1f}%" if oq.get('onset_completeness_pct') is not None else 'N/A')
+        feats=ef.get('features',{}) if isinstance(ef,dict) else {}
+        ci2.metric('Epicurve peak',str(feats.get('peak_cases','N/A')))
+        warnings_q=oq.get('warnings',[]) if isinstance(oq,dict) else []
+        for w in warnings_q: st.warning('Data-quality signal: '+str(w))
+        st.info('Indeks kasus ditampilkan sebagai **kandidat berdasarkan onset tercatat paling awal**, bukan penetapan kasus indeks. Perbedaan onset, pemeriksaan, dan pelaporan dapat menimbulkan bias temporal.')
 
     st.markdown(f'#### Cara membaca menu ML untuk **{disease_name}**')
     st.info('Hasil ML dipisahkan menjadi empat perspektif. **Penjelasan** menjawab apa arti hasilnya, **Academic** menjelaskan validitas metodologis, **Practitioner** menerjemahkan sinyal menjadi prioritas lapangan, dan **Executive DSS** merangkum situasi untuk mendukung keputusan. Keempatnya menggunakan hasil engine yang sama.')

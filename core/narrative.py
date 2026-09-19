@@ -247,8 +247,7 @@ def curve_expert(result, disease):
         lines.append("Forecast belum tersedia atau data belum mencukupi.")
     lines += [
         "",
-        "### 🔬 Penjelasan akademik/praktisi",
-        "Interpretasi kurva harus mempertimbangkan interval waktu, keterlambatan pelaporan, tanggal onset, perubahan testing, seasonality, serial interval, dan intervensi. "
+        "### 🔬 Penjelasan akademik/praktisi",        "Interpretasi kurva harus mempertimbangkan interval waktu, keterlambatan pelaporan, tanggal onset, perubahan testing, seasonality, serial interval, dan intervensi. "
         "Forecast sebaiknya dibandingkan dengan baseline sederhana dan dievaluasi secara temporal berulang.",
         "",
         "### 👥 Penjelasan untuk masyarakat",
@@ -497,8 +496,7 @@ def ai_prediction_expert(result, disease, label):
     total = len(df)
     death = _death_series(df)
     deaths = int(death.sum())
-    cfr = _pct(deaths,total)
-    klb = result.get("klb",{}) if isinstance(result,dict) else {}
+    cfr = _pct(deaths,total)    klb = result.get("klb",{}) if isinstance(result,dict) else {}
     ews = result.get("ews",{}) if isinstance(result,dict) else {}
     rt = result.get("rt",{}) if isinstance(result,dict) else {}
     ml = result.get("ml",{}) if isinstance(result,dict) else {}
@@ -566,29 +564,62 @@ def ai_prediction_expert(result, disease, label):
 
 
 def vulnerable_expert(v):
-    if not isinstance(v,list) or not v:
-        return "### 👥 RESUME POPULASI RENTAN\n\nBelum ada profil rentan yang dapat dihitung."
+    """Narrative for vulnerable-population stratification.
+
+    The narrative describes observed strata without ranking a small stratum as
+    the highest-priority population based on raw CFR alone.
+    """
+    if not isinstance(v, list) or not v:
+        return "### 👥 RESUME POPULASI RENTAN\\n\\nBelum ada profil rentan yang dapat dihitung."
+
     d = pd.DataFrame(v)
     lines = [
-        "### 👥 RESUME VULNERABLE POPULATION",
+        "### 👥 RESUME POPULASI RENTAN",
         "",
-        "Stratifikasi kerentanan digunakan untuk menemukan kombinasi karakteristik yang memiliki beban atau outcome lebih berat dalam dataset. "
-        "Strata kecil harus ditafsirkan hati-hati karena estimasi dapat tidak stabil."
+        "Stratifikasi kerentanan digunakan untuk mengidentifikasi kombinasi karakteristik "
+        "yang menunjukkan perbedaan beban penyakit atau outcome dalam dataset. Analisis ini "
+        "merupakan sinyal epidemiologis untuk ditindaklanjuti, bukan penetapan risiko individual "
+        "atau urutan prioritas intervensi.",
     ]
+
     if not d.empty:
+        # Keep the first row as a representative observed stratum only when the
+        # upstream result provides an explicit, stability-aware ordering.
         r = d.iloc[0]
+        age = r.get("Age_Group", "-")
+        occupation = r.get("Pekerjaan", "-")
+        comorbidity = r.get("Status Komorbid", "-")
+        n = int(_num(r.get("Total")))
+        cfr = _num(r.get("CFR (%)"))
+
         lines.append(
-            f"Profil dengan nilai prioritas tertinggi pada hasil tersedia adalah **{r.get('Age_Group','-')} × "
-            f"{r.get('Pekerjaan','-')} × {r.get('Status Komorbid','-')}**, n={int(_num(r.get('Total')))}, "
-            f"CFR={_num(r.get('CFR (%)')):.2f}%."
+            f"**Profil yang teridentifikasi pada hasil tersedia:** **{age} × "
+            f"{occupation} × {comorbidity}**, dengan **n={n:,} observasi** "
+            f"dan **CFR {cfr:.2f}%**."
         )
+        lines.append(
+            "Profil tersebut tidak disebut sebagai *prioritas tertinggi* karena nilai CFR "
+            "dapat terlihat tinggi pada strata dengan jumlah observasi kecil. Besarnya outcome "
+            "perlu dibaca bersama ukuran sampel, stabilitas estimasi, dan ketidakpastian statistik."
+        )
+
     lines += [
         "",
         "### 🔬 Akademik/praktisi",
-        "Kerentanan bukan sinonim severity. Vulnerability sebaiknya didefinisikan menggunakan faktor yang relevan terhadap paparan, susceptibility, akses layanan, komorbiditas, usia, imunisasi, dan konteks sosial; "
-        "definisi target harus ditetapkan sebelum model dilatih.",
+        "Kerentanan sebaiknya ditafsirkan berdasarkan faktor yang relevan terhadap paparan, "
+        "susceptibility, komorbiditas, usia, imunisasi, akses layanan, serta konteks sosial dan "
+        "lingkungan. Strata dengan outcome relatif tinggi merupakan **sinyal untuk validasi dan "
+        "investigasi lebih lanjut**, bukan bukti hubungan sebab-akibat.",
+        "",
+        "Sebelum digunakan untuk keputusan operasional, periksa ukuran strata, confidence interval "
+        "atau ukuran ketidakpastian yang tersedia, definisi outcome, missing data, confounding, "
+        "dan validitas eksternal. CFR adalah proporsi kematian di antara kasus dalam strata; "
+        "CFR tidak sama dengan risiko kematian populasi.",
         "",
         "### 👥 Masyarakat",
-        "Kelompok rentan berarti kelompok yang mungkin membutuhkan perhatian lebih karena karakteristik tertentu. Ini bukan berarti setiap orang dalam kelompok tersebut pasti akan sakit berat."
+        "Kelompok yang terlihat memiliki outcome lebih tinggi dalam dataset dapat menjadi kelompok "
+        "yang perlu diperhatikan lebih lanjut. Namun, hasil tersebut tidak berarti setiap orang "
+        "dalam kelompok tersebut pasti mengalami kondisi yang sama. Data yang lebih besar dan "
+        "verifikasi lapangan diperlukan untuk memastikan apakah pola tersebut konsisten.",
     ]
-    return "\n".join(lines)
+    return "\\n".join(lines)

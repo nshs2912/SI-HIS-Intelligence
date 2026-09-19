@@ -169,3 +169,38 @@ def build_workforce_intelligence(df, company_name="Perusahaan"):
                    "principle":"Corporate dashboard receives aggregate workforce intelligence; NutriMed MyLab remains the individual longitudinal health layer."},
         "care_loop":"SCREENING → ANALYSIS → RISK STRATIFICATION → PREVENTION → CLINICAL REFERRAL → OUTCOME → RE-ANALYSIS",
     }
+
+
+def workforce_policy_narrative(result):
+    if not isinstance(result,dict) or result.get("status")!="ok":
+        return "Workforce Health Intelligence belum dapat dibentuk karena data workforce belum mencukupi."
+    m=result.get("overview",{})
+    n=int(m.get("employees_observed",0))
+    parts=[
+        "### 🏢 WORKFORCE HEALTH INTELLIGENCE — NARASI AKADEMIK & KEBIJAKAN",
+        "",
+        f"Modul ini memandang perusahaan sebagai **populasi kesehatan**. Dengan {n:,} observasi kesehatan yang tersedia, SI-HIS mengubah data skrining, MCU, kunjungan kesehatan, perilaku dan outcome menjadi gambaran agregat mengenai status kesehatan tenaga kerja.",
+        "",
+        "Secara akademik, pendekatan ini mengikuti prinsip population health: unit analisis bukan hanya individu, tetapi distribusi faktor risiko, burden penyakit, perubahan temporal, kelompok kerja, lokasi kerja, dan outcome. Tujuannya adalah menemukan pola yang dapat ditindaklanjuti melalui promosi kesehatan, pencegahan, early detection, rujukan, dan evaluasi outcome.",
+        "",
+        "### 🔬 Dari Individual Health ke Workforce Health",
+        "NutriMed MyLab menjadi **Personal Health Companion** bagi karyawan. Data yang berasal dari aktivitas kesehatan karyawan—misalnya skrining, hasil laboratorium, aktivitas, konsultasi, diet, pengobatan, dan follow-up—tetap berada pada lapisan personal. SI-HIS kemudian membentuk **intelligence agregat** untuk perusahaan sehingga manajemen memperoleh gambaran populasi tanpa harus membuka rekam kesehatan individual.",
+        "",
+        "### 🧠 Empat lapisan intelligence",
+        "1. **Descriptive:** siapa yang menggunakan layanan, pola faktor risiko, burden penyakit, dan distribusi menurut unit/lokasi.",
+        "2. **Analytical:** hubungan pola kesehatan dengan kelompok kerja, waktu, lokasi, faktor risiko, dan outcome; asosiasi tidak otomatis berarti kausalitas.",
+        "3. **Predictive:** memperkirakan perubahan burden atau risiko workforce bila tersedia outcome/target yang tervalidasi dan model melewati validasi temporal.",
+        "4. **Preventive & Prescriptive:** menerjemahkan sinyal menjadi program kesehatan populasi—misalnya skrining ulang, edukasi, intervensi gaya hidup, occupational-health review, rujukan dan monitoring—dengan keputusan akhir berada pada tenaga kesehatan dan manajemen sesuai kewenangan.",
+        "",
+        "### 🎯 Untuk pengambil keputusan perusahaan",
+        "Dashboard sebaiknya menjawab lima pertanyaan: **(1) bagaimana status kesehatan workforce saat ini; (2) faktor risiko apa yang paling sering muncul; (3) unit/lokasi mana yang menunjukkan perubahan pola; (4) apa yang diproyeksikan bila tren berlanjut; dan (5) program preventif apa yang perlu dievaluasi serta bagaimana outcome-nya diukur.**",
+        "",
+        "### 🛡️ Guardrail tata kelola",
+        "Data kesehatan merupakan data pribadi spesifik dalam UU PDP. Karena itu, dashboard korporat dirancang berbasis **agregasi, pembatasan ukuran kelompok, minimisasi data, kontrol akses, audit trail, tujuan pemrosesan yang jelas, dan pemisahan antara data personal karyawan dengan intelligence organisasi**. Ambang minimum cohort pada prototype adalah 10 observasi dan harus dikaji kembali bersama DPO/legal/occupational-health governance perusahaan.",
+        "",
+        "### 🔄 Closed-loop Workforce Health",
+        "SCREENING → PERSONAL HEALTH JOURNEY → POPULATION ANALYSIS → RISK STRATIFICATION → PREDICTION → PREVENTION/PRESCRIPTION → INTERVENTION → OUTCOME → NEW DATA → CONTINUOUS LEARNING",
+        "",
+        "Dalam implementasi produksi, dashboard tidak boleh menjadi alat untuk menilai kelayakan kerja, promosi, pemutusan hubungan kerja, atau diskriminasi berdasarkan kondisi kesehatan. Fungsi utamanya adalah **workforce health improvement, prevention, occupational-health surveillance, service planning, dan pengukuran outcome**."
+    ]
+    return "\n".join(parts)

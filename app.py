@@ -764,35 +764,55 @@ def _render_ml_forecast(result):
     with st.expander('📖 Cara membaca forecasting',expanded=False):
         st.markdown('Forecast adalah estimasi model, bukan jumlah kasus yang pasti terjadi. MAE/RMSE menggambarkan kesalahan pada backtest; semakin kecil umumnya semakin baik. Puncak forecast adalah nilai tertinggi yang diproyeksikan dalam horizon. Gunakan bersama kurva epidemik, EWS, Rₜ, dan konteks intervensi.')
 
+def _render_signal_table(title, description, result, max_rows=15):
+    st.markdown(f'#### {title}')
+    st.caption(description)
+    if not isinstance(result,dict) or result.get('status')!='ok':
+        st.info(result.get('message','Sinyal belum tersedia.') if isinstance(result,dict) else 'Sinyal belum tersedia.')
+        return
+    data=result.get('data')
+    if isinstance(data,pd.DataFrame) and not data.empty:
+        st.dataframe(data.head(max_rows),use_container_width=True,hide_index=True)
+    else:
+        st.info('Belum ada sinyal yang dapat ditampilkan.')
+
+
 def render_ml_report(ml):
-    st.markdown('### 🧠 AI/ML Intelligence Report')
-    st.caption('Lima lapisan ML/AI SI-HIS. Setiap lapisan memiliki target dan fungsi berbeda. Model teknis tidak ditampilkan sebagai pengganti hasil analisis.')
+    st.markdown('### 🧠 SI-HIS Continuous ML & Intelligence')
+    st.caption('SI-HIS mempertahankan **5 primary ML engines**. Di sekelilingnya terdapat supporting intelligence modules untuk anomaly, change-point, growth, spatial-neighbour, vulnerability clustering, dan continuous signal prioritization.')
     if not isinstance(ml,dict) or not ml:
         st.info('ML layer belum dijalankan.')
         return
-    _render_ml_model_card(
-        '1. Case Severity Prediction',
-        'Memprediksi probabilitas kasus masuk outcome severity yang didefinisikan sistem. Pada implementasi saat ini, target demo severity diturunkan dari kematian atau status rawat inap.',
-        'Kasus mana yang perlu mendapat prioritas pemantauan/triase berdasarkan probabilitas outcome model?',
-        ml.get('case_severity'))
-    _render_ml_model_card(
-        '2. KLB / Outbreak 7-Day Prediction',
-        'Memprediksi apakah beban kasus 7 hari berikutnya pada desa mencapai threshold turunan dari distribusi historis. Threshold ini adalah threshold model, bukan definisi legal KLB.',
-        'Desa mana yang perlu dipantau lebih dini karena sinyal temporalnya mengarah ke peningkatan beban 7 hari?',
-        ml.get('klb'))
-    _render_ml_model_card(
-        '3. Spatial Outbreak Prediction',
-        'Menggabungkan sinyal temporal dan lokasi untuk memperkirakan area yang berpotensi mengalami peningkatan outbreak pada horizon berikutnya.',
-        'Wilayah mana yang perlu diprioritaskan untuk verifikasi spasial dan investigasi?',
-        ml.get('spatial'))
-    _render_ml_model_card(
-        '4. Vulnerable Population Prediction',
-        'Memprediksi outcome rentan berdasarkan karakteristik person dan paparan. Hasilnya dipakai untuk surveillance/population prioritization, bukan diagnosis individual.',
-        'Kelompok atau karakteristik kasus mana yang perlu mendapat perhatian surveillance lebih lanjut?',
-        ml.get('vulnerable'))
+
+    arch=ml.get('architecture',{})
+    if arch:
+        st.info(f"**Arsitektur:** {arch.get('primary_engine_count',5)} primary engines + {arch.get('supporting_signal_modules',6)} supporting signal modules. **Continuous loop:** {arch.get('loop','DATA → ANALYSIS → PREDICTION → PRESCRIPTION → NEW DATA → CONTINUOUS LEARNING')}")
+
+    st.markdown('### I. Five Primary ML Engines')
+    _render_ml_model_card('1. Case Severity Prediction','Memprediksi probabilitas outcome severity yang didefinisikan sistem. Pada prototype, target severity diturunkan dari kematian atau status rawat inap dan bukan diagnosis klinis.','Kasus mana yang perlu mendapat prioritas pemantauan berdasarkan probabilitas outcome model?',ml.get('case_severity'))
+    _render_ml_model_card('2. KLB / Outbreak 7-Day Prediction','Memprediksi beban kasus 7 hari berikutnya pada desa menggunakan threshold model yang diturunkan dari data historis. Threshold ini bukan definisi legal KLB.','Desa mana yang perlu dipantau lebih dini karena sinyal temporalnya meningkat?',ml.get('klb'))
+    _render_ml_model_card('3. Spatial Outbreak Prediction','Menggabungkan fitur temporal dan koordinat untuk memprediksi risiko peningkatan outbreak pada area berikutnya.','Wilayah mana yang perlu diprioritaskan untuk verifikasi spasial dan investigasi?',ml.get('spatial'))
+    _render_ml_model_card('4. Vulnerable Population Prediction','Memprediksi outcome rentan dari karakteristik person/paparan. Pada tahap ini digunakan untuk surveillance dan population prioritization, bukan diagnosis individual.','Karakteristik atau kelompok kasus mana yang perlu mendapat perhatian surveillance?',ml.get('vulnerable'))
     _render_ml_forecast(ml.get('forecast'))
-    st.markdown('### 📌 Cara Membaca Hasil ML secara Keseluruhan')
-    st.markdown('1. **Mulai dari target:** pahami apa yang sebenarnya diprediksi.\n2. **Lihat holdout temporal:** jangan hanya melihat training performance.\n3. **Perhatikan PR-AUC, recall, precision, specificity dan Brier**, terutama bila outcome positif jarang.\n4. **Baca feature importance sebagai sinyal prediktif**, bukan faktor penyebab.\n5. **Hubungkan prediction dengan TIME + PERSON + PLACE dan outcome epidemiologis** sebelum membuat keputusan.\n6. **Validasi eksternal diperlukan** sebelum model digunakan sebagai dasar keputusan operasional.')
+
+    st.markdown('### II. Supporting ML / Epidemiological Intelligence')
+    ci=ml.get('continuous_intelligence',{})
+    _render_signal_table('5. Temporal Anomaly Detection','Isolation Forest mendeteksi pola jumlah kasus harian yang tidak lazim pada level desa. Ini adalah sinyal investigasi, bukan diagnosis outbreak.',ci.get('temporal_anomaly'))
+    _render_signal_table('6. Change-Point Detection','Mendeteksi perubahan level/arah beban kasus melalui pergeseran rolling mean dan deviasi historis yang transparan.',ci.get('change_points'))
+    _render_signal_table('7. Disease Growth Risk','Mengubah sinyal pertumbuhan 7-hari dan akselerasi menjadi risk score untuk prioritas surveillance.',ci.get('growth_risk'))
+    _render_signal_table('8. Spatial-Neighbor Intelligence','Menghitung beban kasus pada desa sekitar berdasarkan jarak geografis untuk memperkaya fitur spasial; tidak menyimpulkan hubungan penularan.',ci.get('spatial_neighbor'))
+    _render_signal_table('9. Vulnerability Clustering','KMeans mengelompokkan profil kerentanan berbasis karakteristik person yang tersedia. Cluster bersifat eksploratif dan perlu validasi epidemiologis.',ci.get('vulnerability_clustering'))
+    _render_signal_table('10. Continuous Signal Prioritization','Menggabungkan anomaly, change-point, dan growth signal menjadi antrean prioritas yang transparan untuk surveillance/investigasi.',ci.get('signal_prioritization'))
+
+    st.markdown('### III. Model Validation & Operational Readiness')
+    st.markdown('Model classifier menampilkan **ROC-AUC, PR-AUC, precision, recall, specificity, F1 dan Brier score** pada holdout temporal. Feature importance dibaca sebagai sinyal prediktif, bukan bukti kausal. Untuk tahap produksi, SI-HIS perlu mempertahankan calibration monitoring, PSI/data-drift monitoring, model registry/versioning, external validation, dan audit trail setiap prediction run.')
+
+    st.markdown('### 🔄 Continuous Intelligence Loop')
+    st.markdown('**DATA → ANALYSIS → PREDICTION → PRESCRIPTION → INTERVENTION → OUTCOME → NEW DATA → ANALYSIS → …**')
+    st.caption('“Prescription” di SI-HIS berarti rekomendasi/decision support yang dihasilkan dari intelligence layer. Keputusan klinis, epidemiologis, atau kebijakan tetap memerlukan otoritas dan validasi manusia.')
+
+    st.markdown('### 📌 Cara Membaca Hasil ML')
+    st.markdown('1. **Mulai dari target:** pahami apa yang sebenarnya diprediksi.\n2. **Gunakan holdout temporal:** jangan hanya melihat training performance.\n3. **Perhatikan PR-AUC, recall, specificity dan Brier**, terutama bila outcome positif jarang.\n4. **Baca feature importance sebagai sinyal prediktif**, bukan faktor penyebab.\n5. **Hubungkan prediction dengan TIME + PERSON + PLACE, EWS, Rₜ dan outcome** sebelum membuat keputusan.\n6. **Validasi eksternal dan monitoring drift/calibration diperlukan** sebelum model digunakan sebagai dasar keputusan operasional.')
 
 st.sidebar.header('⚙️ Panel Kontrol & Filter')
 source_options=get_source_catalog()

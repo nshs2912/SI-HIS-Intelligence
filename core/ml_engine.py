@@ -10,7 +10,7 @@ from sklearn.ensemble import RandomForestClassifier, IsolationForest
 from sklearn.impute import SimpleImputer
 from sklearn.inspection import permutation_importance
 from sklearn.linear_model import LogisticRegression
-from sklearn.metrics import (accuracy_score, average_precision_score, brier_score_loss,
+from sklearn.metrics import (accuracy_score, average_precision_score, brier_score_loss, log_loss,
     f1_score, precision_score, recall_score, roc_auc_score, mean_absolute_error,
     mean_squared_error, confusion_matrix)
 from sklearn.pipeline import Pipeline
@@ -130,6 +130,29 @@ def _metrics_narrative(metrics,label,positive_rate):
             "Feature importance adalah kontribusi prediktif pada holdout, bukan bukti hubungan sebab-akibat. Output ini merupakan decision-support dan memerlukan validasi epidemiologi/klinis.")
 
 
+def _probability_calibration(y_true, prob, bins=10):
+    """Holdout calibration diagnostic; this function does not recalibrate the model."""
+    try:
+        y = pd.to_numeric(pd.Series(y_true), errors="coerce").astype(int).to_numpy()
+        p = np.clip(pd.to_numeric(pd.Series(prob), errors="coerce").to_numpy(float), 1e-6, 1 - 1e-6)
+        if len(y) < 20 or len(np.unique(y)) < 2:
+            return {"status": "insufficient_data"}
+        edges = np.linspace(0.0, 1.0, bins + 1)
+        rows = []
+        for lo, hi in zip(edges[:-1], edges[1:]):
+            mask = (p >= lo) & ((p < hi) if hi < 1 else (p <= hi))
+            if not mask.any():
+                continue
+            rows.append({"bin_lower": float(lo), "bin_upper": float(hi), "n": int(mask.sum()),
+                         "mean_predicted": float(p[mask].mean()), "observed_rate": float(y[mask].mean())})
+        ece = float(sum(r["n"] * abs(r["mean_predicted"] - r["observed_rate"]) for r in rows) / len(y)) if rows else np.nan
+        return {"status": "ok", "ece": ece, "log_loss": float(log_loss(y, p, labels=[0, 1])),
+                "bins": rows,
+                "interpretation": "ECE lebih kecil menunjukkan kedekatan probabilitas prediksi dengan frekuensi outcome pada holdout; ECE bukan bukti generalisasi populasi."}
+    except Exception as exc:
+        return {"status": "error", "message": str(exc)}
+
+
 def _train_classifier(df,target,features,label):
     split=_temporal_split(df,target,features)
     if split is None:return {'status':'error','message':f'Data/target {label} tidak cukup atau holdout temporal hanya memiliki satu kelas.'}
@@ -137,7 +160,8 @@ def _train_classifier(df,target,features,label):
     metrics={'roc_auc':roc_auc_score(yte,p),'pr_auc':average_precision_score(yte,p),'accuracy':accuracy_score(yte,pred),'precision':precision_score(yte,pred,zero_division=0),'recall':recall_score(yte,pred,zero_division=0),'specificity':tn/(tn+fp) if tn+fp else np.nan,'f1':f1_score(yte,pred,zero_division=0),'brier':brier_score_loss(yte,p)}
     positive_rate=float(yte.mean())
     metrics['Narrative']=_metrics_narrative(metrics,label,positive_rate)
-    return {'status':'ok','model':model,'features':features,'label':label,'metrics':metrics,**{k:v for k,v in metrics.items() if k != 'Narrative'},'feature_importance':_feature_importance(model,Xte,yte,features),'holdout_start':te['Tanggal Sakit'].min() if 'Tanggal Sakit' in te else None,'train_rows':len(tr),'test_rows':len(te),'positive_rate':positive_rate,'stability':_stability_label(len(te),int(yte.sum())),'stability_note':_stability_note(len(te),int(yte.sum()))}
+    calibration=_probability_calibration(yte,p)
+    return {'status':'ok','model':model,'features':features,'label':label,'metrics':metrics,**{k:v for k,v in metrics.items() if k != 'Narrative'},'feature_importance':_feature_importance(model,Xte,yte,features),'holdout_start':te['Tanggal Sakit'].min() if 'Tanggal Sakit' in te else None,'train_rows':len(tr),'test_rows':len(te),'positive_rate':positive_rate,'calibration':calibration,'stability':_stability_label(len(te),int(yte.sum())),'stability_note':_stability_note(len(te),int(yte.sum()))}
 
 
 def _severity_target(df):

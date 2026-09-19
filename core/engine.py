@@ -139,7 +139,20 @@ class IntelligenceEngine:
     def analyze(self,df,scope=None,forecast_days=14,include_ml=False,mode="epidemiology"):
         if mode=="descriptive":return self.descriptive(df)
         prepared=self.prepare(df,scope);scoped=_apply_period(prepared.dataframe,prepared.scope.period_days);disease=prepared.scope.disease
-        if not disease or disease=="Semua Penyakit":return self.descriptive(prepared.dataframe)
+        if not disease or disease=="Semua Penyakit":
+            return {
+                "mode": "epidemiology",
+                "eligible": False,
+                "message": "Analisis epidemiologi disease-specific memerlukan satu penyakit. Gunakan mode descriptive untuk Semua Penyakit.",
+                "scope": prepared.scope.to_dict(),
+                "overview": {"total_cases": len(prepared.dataframe), "deaths": int(_death_series(prepared.dataframe).sum())},
+                "analysis_sections": {
+                    "descriptive": self.descriptive(prepared.dataframe),
+                    "person": None, "place": None, "time": None, "spatial": None,
+                    "forecast": None, "risk": None, "surveillance": None, "machine_learning": None,
+                },
+                "provenance": {**prepared.provenance, "analysis_mode": "descriptive_only", "reason": "all_disease_or_missing_disease"},
+            }
         work=_filter_disease(scoped,disease)
         if prepared.scope.puskesmas:geographic_level="Puskesmas"
         elif prepared.scope.village:geographic_level="Desa/Kelurahan"
@@ -148,7 +161,7 @@ class IntelligenceEngine:
         elif prepared.scope.province:geographic_level="Provinsi"
         else:geographic_level="Indonesia"
         eligibility=validate_scope_for_special_analysis(work,disease,geographic_level,10,14);profile=resolve_disease_profile(disease)
-        common={"mode":"epidemiology","eligible":eligibility.eligible,"eligibility":{"reasons":eligibility.reasons,"warnings":eligibility.warnings},"scope":prepared.scope.to_dict(),"overview":{"total_cases":len(work),"provinces":work["Provinsi"].nunique() if "Provinsi" in work else 0,"districts":work["Kabupaten"].nunique() if "Kabupaten" in work else 0,"subdistricts":work["Kecamatan"].nunique() if "Kecamatan" in work else 0,"villages":work["Desa/Kelurahan"].nunique() if "Desa/Kelurahan" in work else 0,"deaths":int(_death_series(work).sum()),"cfr":round(float(_death_series(work).mean()*100),2) if len(work) else 0.0},"disease_profile":profile.__dict__,"provenance":{**prepared.provenance,"analysis_mode":"disease_scoped_epidemiology","ml_enabled":bool(include_ml)}}
+        common={"mode":"epidemiology","eligible":eligibility.eligible,"eligibility":{"reasons":eligibility.reasons,"warnings":eligibility.warnings},"scope":prepared.scope.to_dict(),"overview":{"total_cases":len(work),"provinces":work["Provinsi"].nunique() if "Provinsi" in work else 0,"districts":work["Kabupaten"].nunique() if "Kabupaten" in work else 0,"subdistricts":work["Kecamatan"].nunique() if "Kecamatan" in work else 0,"villages":work["Desa/Kelurahan"].nunique() if "Desa/Kelurahan" in work else 0,"deaths":int(_death_series(work).sum()),"cfr":round(float(_death_series(work).mean()*100),2) if len(work) else 0.0},"disease_profile":profile.__dict__,"analysis_sections":{"descriptive":None,"person":None,"place":None,"time":None,"spatial":None,"forecast":None,"risk":None,"surveillance":"klb","machine_learning":None},"provenance":{**prepared.provenance,"analysis_mode":"disease_scoped_epidemiology","ml_enabled":bool(include_ml)}}
         # KLB surveillance is evaluated even when the special statistical scope is
         # not eligible, because early detection and data sufficiency are separate.
         common["klb"] = evaluate_klb(work, disease=profile.name, geographic_scope=geographic_level)
@@ -161,6 +174,7 @@ class IntelligenceEngine:
         disease_cohort=scoped.copy();disease_target=_binary_outcome_from_disease(disease_cohort,disease);severity_target=_severity_outcome(work);mortality_target=_death_series(work)
         outcome_analyses={"Penyakit":_outcome_analysis(disease_cohort,disease_target,"Penyakit",f"Faktor yang berasosiasi dengan kejadian {disease} pada seluruh kasus dalam scope."),"Severity":_outcome_analysis(work,severity_target,"Severity",f"Faktor yang berasosiasi dengan severity pada kasus {disease}."),"Kasus Meninggal":_outcome_analysis(work,mortality_target,"Kasus Meninggal",f"Faktor yang berasosiasi dengan kematian pada kasus {disease}.")}
         common.update({"person":person,"place":trias["place"],"trias_summary":trias_summary,"time":epi,"analysis_dataframe":work.copy(deep=True),"mortality":analyze_mortality(work),"risk":analyze_risk(work),"risk_factors":outcome_analyses["Penyakit"],"outcome_analyses":outcome_analyses,"vulnerable":identifikasi_vulnerable_profile(work),"ews":early_warning(epi),"rt":hitung_effective_rt(epi) if not epi.empty else None,"waves":waves,"forecast":holt_winters_forecast(epi,forecast_days),"spatial":spatial,"epicenters":compute_epicenter(spatial),"temporal_interpretation":classify_temporal_pattern_for_disease(profile,len(waves)),"epidemic_curve_classification":curve,"ml":self.ml_train(work) if include_ml else {"enabled":False,"message":"ML layer tidak dijalankan."}})
+        common["analysis_sections"].update({"descriptive":None,"person":person,"place":trias["place"],"time":epi,"spatial":spatial,"forecast":common["forecast"],"risk":common["risk"],"surveillance":{"klb":common["klb"],"ews":common["ews"],"rt":common["rt"]},"machine_learning":common["ml"]})
         return common
 
     def ml_train(self,df):

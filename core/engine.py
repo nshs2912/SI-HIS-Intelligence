@@ -178,7 +178,7 @@ class IntelligenceEngine:
         elif prepared.scope.district:geographic_level="Kabupaten"
         elif prepared.scope.province:geographic_level="Provinsi"
         else:geographic_level="Indonesia"
-        eligibility=validate_scope_for_special_analysis(work,disease,geographic_level,10,14);profile=resolve_disease_profile(disease);disease_intel=classify_disease(disease);infectious_intel=build_infectious_intelligence(work,disease);acute_event_intel=poisoning_vs_disaster_signal(work)
+        eligibility=validate_scope_for_special_analysis(work,disease,geographic_level,10,14);profile=resolve_disease_profile(disease);disease_intel=classify_disease(disease);infectious_intel=build_infectious_intelligence(work,disease);acute_event_intel=poisoning_vs_disaster_signal(work);toxicology_intel=toxicology_differential(work)
         incident_v2=incident_reasoning_v2(work)
         # For communicable diseases, onset is the epidemiological clock when it is available.
         # The original service/examination date is preserved for data-quality review.

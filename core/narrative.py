@@ -363,6 +363,7 @@ def ml_expert(ml, disease=None, label=None):
 
     primary = ml.get("primary_engines", {})
     supporting = ml.get("continuous_intelligence", {})
+    vulnerability = supporting.get("vulnerability_clustering", {}) if isinstance(supporting, dict) else {}
 
     lines = [
         f"### 🤖 RESUME MACHINE LEARNING & EPIDEMIOLOGICAL AI — {disease_name}",
@@ -397,6 +398,24 @@ def ml_expert(ml, disease=None, label=None):
         f"SI-HIS saat ini menjalankan **{len(primary) if isinstance(primary, dict) else 5} primary engine** dan supporting intelligence untuk memperkuat surveillance dan decision support.",
         "",
     ]
+
+    if isinstance(vulnerability, dict) and vulnerability.get("status") == "ok":
+        strata = vulnerability.get("vulnerability_strata")
+        if isinstance(strata, pd.DataFrame) and not strata.empty:
+            top = strata.iloc[0]
+            lines += [
+                "### 👥 Stratifikasi Kerentanan",
+                "",
+                f"Strata ditampilkan dengan label eksplisit: **usia, pekerjaan, dan status komorbid**. "
+                f"Strata prioritas pada dataset adalah **{top.get('Strata_Label','-')}**, "
+                f"n={int(top.get('Jumlah_Observasi',0))}, CFR={float(top.get('CFR_Persen',0)):.2f}%, "
+                f"stabilitas={top.get('Stabilitas','-')}.",
+                "",
+                "Prioritas tidak ditentukan dari CFR mentah saja. Sistem memberikan penalti pada strata kecil agar CFR tinggi dengan denominator kecil tidak otomatis mendominasi.",
+                "Strata **RENDAH** harus dibaca sebagai sinyal pada dataset, bukan sebagai estimasi risiko populasi. "
+                "Sebagai prinsip kehati-hatian, ukuran kecil dapat menghasilkan ketidakpastian yang besar.",
+                "",
+            ]
 
     items = [
         ("Case Severity", "memperkirakan probabilitas outcome severity yang didefinisikan sistem pada kasus penyakit terpilih", "prioritas pemantauan"),

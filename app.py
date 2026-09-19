@@ -10,8 +10,8 @@ from core.downloads import build_evaluation_excel, build_evaluation_csv, build_r
 from core.engine import SIHISIntelligenceEngine
 from core.scope import QueryScope
 warnings.filterwarnings('ignore')
-st.set_page_config(page_title='SI-HIS Intelligence',page_icon='🧠',layout='wide')
-st.markdown('''<div style="background:#f0e68c;padding:18px 22px;border-radius:12px;border:2px solid #d4c886;"><h1 style="margin:0;color:#1e3a8a;font-size:1.7rem;">SI-HIS — Smart Integrated Health Intelligence System</h1><p style="margin:6px 0 0;color:#475569;font-weight:600;">Early Detection, Smarter Intervention</p></div>''',unsafe_allow_html=True)
+st.set_page_config(page_title='SI-HIS — Continuous Health Intelligence',page_icon='🧠',layout='wide')
+st.markdown('''<div style="padding:26px 30px 24px;border-radius:16px;border:1px solid #cbd5e1;background:linear-gradient(135deg,#f8fafc 0%,#eef6ff 100%);box-shadow:0 4px 18px rgba(15,23,42,.06);"><div style="font-size:.92rem;letter-spacing:.12em;text-transform:uppercase;color:#64748b;font-weight:700;">SI-HIS</div><h1 style="margin:4px 0 2px;color:#0f172a;font-size:2.05rem;">Smart Integrated Health Intelligence System</h1><div style="font-size:1.25rem;color:#1d4ed8;font-weight:800;margin-top:14px;">CONTINUOUS HEALTH INTELLIGENCE ENGINE</div><div style="margin-top:7px;color:#475569;font-weight:600;">Data → Intelligence → Prediction → Prescription → Outcome → New Data → Continuous Learning</div><div style="height:1px;background:#cbd5e1;margin:20px 0 17px;"></div><div style="font-size:.95rem;letter-spacing:.08em;text-transform:uppercase;color:#64748b;font-weight:700;">Powered by SI-HIS</div><div style="font-size:1.35rem;color:#0f172a;font-weight:800;margin-top:3px;">NutriMed MyLab</div><div style="font-size:1.02rem;color:#334155;font-weight:700;margin-top:3px;">Personal Health Companion &amp; Longitudinal Health Journey</div><div style="margin-top:12px;color:#475569;font-style:italic;">From Individual Health to Population Health — and Back.</div></div>''',unsafe_allow_html=True)
 st.caption(f"🕒 Waktu Sistem: {get_wib_time()['full']}")
 engine=SIHISIntelligenceEngine()
 

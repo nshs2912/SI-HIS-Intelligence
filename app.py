@@ -915,7 +915,8 @@ else:
             if not valid_chart.empty:st.line_chart(valid_chart.set_index('Tanggal Sakit')['Jumlah Kasus'])
             render_value(t,'TIME')
         show_resume('Distribusi mortalitas dan CFR menjelaskan beban kematian relatif terhadap jumlah kasus. CFR adalah proporsi kasus penyakit yang meninggal akibat penyakit tersebut; mortality rate menggunakan populasi sebagai denominator.')
-        render_value(mortality,'MORTALITY / CFR');show_resume(vulnerable_expert(result.get('vulnerable')),'tabel profil kerentanan di bawah')\n        render_value(result.get('vulnerable'),'Vulnerable Population')
+        render_value(mortality,'MORTALITY / CFR');show_resume(vulnerable_expert(result.get('vulnerable')),'tabel profil kerentanan di bawah')
+        render_value(result.get('vulnerable'),'Vulnerable Population')
     with tabs[2]:
         st.markdown('### 📈 Kurva Epidemik & Prediksi')
         show_tab_resume('Resume Kurva Epidemik & Prediksi',curve_expert(result,sel_disease),'kurva, gelombang, forecast dan Rₜ di bawah')

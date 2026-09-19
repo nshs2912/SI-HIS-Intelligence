@@ -194,11 +194,11 @@ class IntelligenceEngine:
         if not trias_summary["top10_province"].empty:person["10 Besar Wilayah — Provinsi"]=trias_summary["top10_province"]
         disease_cohort=scoped.copy();disease_target=_binary_outcome_from_disease(disease_cohort,disease);severity_target=_severity_outcome(work);mortality_target=_death_series(work)
         outcome_analyses={"Penyakit":_outcome_analysis(disease_cohort,disease_target,"Penyakit",f"Faktor yang berasosiasi dengan kejadian {disease} pada seluruh kasus dalam scope."),"Severity":_outcome_analysis(work,severity_target,"Severity",f"Faktor yang berasosiasi dengan severity pada kasus {disease}."),"Kasus Meninggal":_outcome_analysis(work,mortality_target,"Kasus Meninggal",f"Faktor yang berasosiasi dengan kematian pada kasus {disease}.")}
-        common.update({"person":person,"place":trias["place"],"trias_summary":trias_summary,"time":epi,"analysis_dataframe":work.copy(deep=True),"mortality":analyze_mortality(work),"risk":analyze_risk(work),"risk_factors":outcome_analyses["Penyakit"],"outcome_analyses":outcome_analyses,"vulnerable":identifikasi_vulnerable_profile(work),"ews":early_warning(epi),"rt":hitung_effective_rt(epi) if not epi.empty else None,"waves":waves,"forecast":holt_winters_forecast(epi,forecast_days),"spatial":spatial,"epicenters":compute_epicenter(spatial),"temporal_interpretation":classify_temporal_pattern_for_disease(profile,len(waves)),"epidemic_curve_classification":curve,"ml":self.ml_train(work) if include_ml else {"enabled":False,"message":"ML layer tidak dijalankan."}})
+        common.update({"person":person,"place":trias["place"],"trias_summary":trias_summary,"time":epi,"analysis_dataframe":work.copy(deep=True),"mortality":analyze_mortality(work),"risk":analyze_risk(work),"risk_factors":outcome_analyses["Penyakit"],"outcome_analyses":outcome_analyses,"vulnerable":identifikasi_vulnerable_profile(work),"ews":early_warning(epi),"rt":hitung_effective_rt(epi) if not epi.empty else None,"waves":waves,"forecast":holt_winters_forecast(epi,forecast_days),"spatial":spatial,"epicenters":compute_epicenter(spatial),"temporal_interpretation":classify_temporal_pattern_for_disease(profile,len(waves)),"epidemic_curve_classification":curve,"ml":self.ml_train(work,disease) if include_ml else {"enabled":False,"message":"ML layer tidak dijalankan."}})
         common["analysis_sections"].update({"descriptive":None,"person":person,"place":trias["place"],"time":epi,"spatial":spatial,"forecast":common["forecast"],"risk":common["risk"],"surveillance":{"klb":common["klb"],"ews":common["ews"],"rt":common["rt"]},"machine_learning":common["ml"]})
         return common
 
-    def ml_train(self,df):
+    def ml_train(self,df,disease=None):
         # Performance optimization only: identical analytical input reuses the
         # exact same ML result. No rows, fields, algorithms, targets, or metrics
         # are changed. A new/changed dataset produces a new cache key and is
@@ -228,6 +228,7 @@ class IntelligenceEngine:
             "primary_engines": {"case_severity":severity,"klb":klb,"spatial":spatial,"vulnerable":vulnerable,"forecast":forecast},
             "case_severity":severity,"klb":klb,"spatial":spatial,"vulnerable":vulnerable,"forecast":forecast,
             "continuous_intelligence": {"temporal_anomaly":anomaly,"change_points":changes,"growth_risk":growth,"spatial_neighbor":neighbor,"vulnerability_clustering":vulnerability,"spatiotemporal_risk":spatiotemporal,"time_person_place_risk":tpp,"disease_specific_growth":disease_growth,"signal_prioritization":continuous},
+            "disease_intelligence": classify_disease(disease).__dict__ if disease else None,"infectious_intelligence": build_infectious_intelligence(df,disease) if disease else None,
             "architecture": {"primary_engine_count":5,"supporting_signal_modules":9,"loop":"DATA → ANALYSIS → PREDICTION → PRESCRIPTION → NEW DATA → CONTINUOUS LEARNING"}
         }
         _ML_RESULT_CACHE[cache_key]=copy.deepcopy(result)

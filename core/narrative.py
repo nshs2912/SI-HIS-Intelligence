@@ -390,7 +390,7 @@ def risk_expert(result):
 
 
 def ml_expert(ml, disease=None, label=None):
-    """Expert ML narrative: epidemiological ML as a capability layer over 5 primary engines."""
+    """Narrative ML epidemiologi yang ringkas, disease-aware, dan decision-support oriented."""
     disease_name = disease or "penyakit terpilih"
     scope_name = label or "scope analisis"
     if not isinstance(ml, dict) or not ml:
@@ -398,158 +398,91 @@ def ml_expert(ml, disease=None, label=None):
             f"### 🤖 RESUME MACHINE LEARNING & EPIDEMIOLOGICAL AI — {disease_name}\n\n"
             f"ML layer belum dijalankan untuk **{disease_name}** pada **{scope_name}**."
         )
-
     primary = ml.get("primary_engines", {})
     supporting = ml.get("continuous_intelligence", {})
     vulnerability = supporting.get("vulnerability_clustering", {}) if isinstance(supporting, dict) else {}
-
+    profile = ml.get("disease_intelligence", {})
+    family = str(profile.get("family", "")).upper() if isinstance(profile, dict) else ""
+    if family == "MENULAR":
+        context = "surveillance penularan, perubahan temporal, spasial, dan outcome"
+    elif family == "PTM":
+        context = "tren penyakit, faktor risiko, progression, severity, dan outcome"
+    else:
+        context = "pola penyakit, outcome, dan perubahan temporal/spasial yang relevan"
     lines = [
-        f"### 🤖 RESUME MACHINE LEARNING & EPIDEMIOLOGICAL AI — {disease_name}",
+        f"### 🤖 RESUME MACHINE LEARNING & EPIDEMIOLOGICAL AI — {disease_name}", "",
+        f"ML Epidemiologi digunakan sebagai lapisan decision support untuk **{context}** pada scope **{scope_name}**.",
+        "Keluaran model membantu menemukan sinyal yang layak diverifikasi; keluaran tersebut bukan diagnosis, bukan bukti kausalitas, dan bukan keputusan otomatis.",
         "",
-        "### 🧬 Apa yang Dilakukan ML Epidemiologi?",
-        "",
-        "ML Epidemiologi pada SI-HIS merupakan lapisan kecerdasan analitik yang menggunakan machine learning dan epidemiological intelligence untuk mengolah data surveillance menjadi **sinyal, prediksi, stratifikasi risiko, dan prioritas investigasi**.",
-        "",
-        "ML Epidemiologi menganalisis pola **TIME + PERSON + PLACE** serta karakteristik penyakit terpilih untuk membantu menjawab pertanyaan epidemiologis utama:",
-        "",
-        "- **Apa yang sedang berubah?** — mendeteksi anomali, perubahan tren, dan perubahan pola epidemiologi.",
-        "- **Di mana perubahan terjadi?** — mengidentifikasi konsentrasi dan pola risiko spasial.",
-        "- **Siapa yang perlu diperhatikan?** — mengidentifikasi kelompok atau populasi dengan karakteristik risiko tertentu.",
-        "- **Seberapa serius sinyal tersebut?** — memperkirakan severity atau outcome target pada kasus yang dianalisis.",
-        "- **Apakah beban penyakit berpotensi meningkat?** — memprediksi pertumbuhan atau peningkatan kasus.",
-        "- **Apa yang mungkin terjadi berikutnya?** — melakukan forecasting berdasarkan pola temporal historis.",
-        "- **Wilayah mana yang perlu diverifikasi lebih dahulu?** — melakukan prioritisasi surveillance dan investigasi.",
-        "- **Sinyal mana yang memerlukan perhatian lebih lanjut?** — menggabungkan berbagai indikator menjadi epidemiological risk signal.",
-        "",
-        "### 🧠 Struktur ML Epidemiologi SI-HIS",
-        "",
-        f"ML Epidemiologi terdiri dari **5 Primary ML Engine** dan **{len(supporting) if isinstance(supporting, dict) else 9} Supporting Intelligence Module**. Kelima primary engine menghasilkan prediksi pada aspek yang berbeda, sedangkan supporting intelligence membantu menemukan perubahan, pola, dan sinyal epidemiologis yang memerlukan verifikasi lebih lanjut.",
-        "",
-        "**5 Primary ML Engine:**",
-        "1. **Case Severity Prediction**",
-        "2. **Outbreak/KLB 7-Day Prediction**",
-        "3. **Spatial Outbreak Prediction**",
-        "4. **Vulnerable Population Prediction**",
-        "5. **Temporal Forecasting**",
-        "",
-        f"**Scope:** {scope_name}. Seluruh model dan supporting signal pada menu ini ditujukan khusus untuk **{disease_name}**. Saat filter penyakit berubah, kohort, target outcome, distribusi kelas, pola waktu, pola tempat, metrik, dan interpretasi harus dibaca ulang.",
-        f"SI-HIS saat ini menjalankan **{len(primary) if isinstance(primary, dict) else 5} primary engine** dan supporting intelligence untuk memperkuat surveillance dan decision support.",
-        "",
+        f"**Scope model:** {disease_name} | **Family:** {family or 'UNKNOWN'} | **Primary engine tersedia:** {len(primary) if isinstance(primary, dict) else 0}.",
     ]
-
     if isinstance(vulnerability, dict) and vulnerability.get("status") == "ok":
         strata = vulnerability.get("vulnerability_strata")
         if isinstance(strata, pd.DataFrame) and not strata.empty:
             top = strata.iloc[0]
             lines += [
-                "### 👥 Stratifikasi Kerentanan",
-                "",
-                f"Strata ditampilkan dengan label eksplisit: **usia, pekerjaan, dan status komorbid**. "
-                f"Strata prioritas pada dataset adalah **{top.get('Strata_Label','-')}**, "
-                f"n={int(top.get('Jumlah_Observasi',0))}, CFR={float(top.get('CFR_Persen',0)):.2f}%, "
-                f"stabilitas={top.get('Stabilitas','-')}.",
-                "",
-                "CFR mentah tidak digunakan sebagai dasar tunggal untuk menentukan prioritas. Strata kecil perlu diperlakukan hati-hati karena estimasinya dapat tidak stabil.",
-                "Strata **RENDAH** harus dibaca sebagai sinyal pada dataset, bukan sebagai estimasi risiko populasi. "
-                "Sebagai prinsip kehati-hatian, ukuran kecil dapat menghasilkan ketidakpastian yang besar.",
-                "",
+                "", "### 👥 Stratifikasi Kerentanan",
+                f"Profil yang ditampilkan dari hasil tersedia: **{top.get('Strata_Label','-')}**, n={int(_num(top.get('Jumlah_Observasi'))):,}, CFR={_num(top.get('CFR_Persen')):.2f}%, stabilitas={top.get('Stabilitas','-')}.",
+                "Profil ini diperlakukan sebagai **sinyal untuk validasi**, bukan sebagai urutan prioritas intervensi. CFR mentah harus dibaca bersama ukuran strata, ketidakpastian, dan stabilitas estimasi.",
             ]
-
-    items = [
-        ("Case Severity", "memperkirakan probabilitas outcome severity yang didefinisikan sistem pada kasus penyakit terpilih", "prioritas pemantauan"),
-        ("Outbreak/KLB 7 Hari", "mencari sinyal peningkatan beban kasus dalam 7 hari berikutnya", "prioritas verifikasi wilayah"),
-        ("Spatial Outbreak", "menggabungkan dimensi waktu dan lokasi untuk mencari area yang perlu diverifikasi lebih dini", "prioritas investigasi spasial"),
-        ("Vulnerable Population", "mencari pola karakteristik person yang berkaitan dengan outcome target", "prioritas kelompok surveillance"),
-        ("Forecasting", "memproyeksikan beban kasus berdasarkan pola waktu historis", "kesiapsiagaan dan kapasitas"),
-    ]
-    for title, purpose, use in items:
-        lines.append(f"**{title}:** Untuk **{disease_name}**, model {purpose}. Keluaran digunakan sebagai **{use}**, bukan diagnosis atau keputusan otomatis.")
-
+    if family == "MENULAR":
+        engines = [
+            ("Case Severity", "memperkirakan outcome severity pada kasus yang dianalisis"),
+            ("Outbreak/KLB 7 Hari", "mencari sinyal peningkatan beban kasus dalam horizon 7 hari"),
+            ("Spatial Outbreak", "mencari kombinasi waktu-lokasi yang layak diverifikasi"),
+            ("Vulnerable Population", "mengidentifikasi pola karakteristik kelompok yang berkaitan dengan outcome"),
+            ("Forecasting", "memproyeksikan beban kasus berdasarkan pola historis"),
+        ]
+    else:
+        engines = [
+            ("Case Severity", "memperkirakan outcome severity pada kasus yang dianalisis"),
+            ("Vulnerable Population", "mengidentifikasi pola karakteristik kelompok yang berkaitan dengan outcome"),
+            ("Forecasting", "memproyeksikan tren/beban penyakit berdasarkan pola historis"),
+        ]
+    lines += ["", "### 🧠 Peran ML pada SI-HIS"]
+    for title, purpose in engines:
+        lines.append(f"**{title}:** {purpose}. Hasil digunakan untuk membantu menentukan **apa yang perlu diverifikasi**, bukan tindakan otomatis.")
     lines += [
-        "",
-        "### 📖 Bahasa sederhana untuk metrik classifier",
-        "**Recall** = dari semua kasus yang benar-benar memiliki outcome target, berapa banyak yang berhasil ditemukan model. Jadi recall 0,077 berarti sekitar **7,7% kasus target tertangkap** pada data uji; sebagian besar target masih dapat terlewat.",
-        "**Specificity** = dari semua kasus yang sebenarnya bukan target, berapa banyak yang berhasil dikenali sebagai bukan target. Specificity 0,939 berarti sekitar **93,9% non-target tersaring dengan benar** pada data uji.",
-        "**Precision** = dari semua kasus yang diprediksi sebagai target, berapa banyak yang benar-benar target. **PR-AUC** merangkum trade-off precision-recall dan penting ketika target jarang. **ROC-AUC** menilai kemampuan diskriminasi model pada berbagai threshold. **Brier score** menilai kualitas probabilitas; semakin kecil umumnya semakin baik.",
-        "",
-        "### 🔬 Interpretasi epidemiologis",
-        f"Feature importance menunjukkan kontribusi prediktif variabel dalam model **{disease_name}**, bukan sebab-akibat. Sinyal spasial bukan otomatis sumber penularan. Forecast bukan kepastian. Risk score adalah alat prioritisasi internal dan bukan status KLB legal.",
-        f"Kinerja model harus dibaca pada populasi dan periode uji yang digunakan. Nilai yang baik pada satu penyakit atau wilayah tidak otomatis berlaku pada penyakit/wilayah lain. Untuk **{disease_name}**, validasi eksternal dan monitoring drift tetap diperlukan sebelum penggunaan operasional.",
-        "",
-        "### 👥 Untuk praktisi/pengambil keputusan",
-        f"Gunakan ML **{disease_name}** bersama TIME + PERSON + PLACE, kurva epidemik, Rₜ, EWS, outcome, analisis spasial, dan investigasi lapangan. ML membantu menentukan **di mana dan apa yang perlu diperiksa lebih dahulu**; otoritas manusia menentukan tindakan.",
-        "",
-        "### ⚠️ Batasan penting",
-        "Outcome target harus memiliki definisi dan label yang valid. Data leakage, missingness, class imbalance, reporting delay, perubahan case definition, calibration drift, dan perubahan pola epidemiologi dapat mengubah performa model. Status ERROR berarti evaluasi belum valid, bukan performa model nol.",
-        "",
-        "### 🔄 Prinsip continuous intelligence",
+        "", "### 🔬 Interpretasi model",
+        "Feature importance menunjukkan kontribusi prediktif variabel dalam model, bukan sebab-akibat. Forecast adalah estimasi berbasis pola historis. Sinyal spasial menunjukkan konsentrasi menurut model, bukan otomatis sumber penularan.",
+        "Kinerja model harus dibaca bersama populasi dan periode uji, class balance, missingness, data leakage, calibration, reporting delay, perubahan definisi kasus, dan kemungkinan model drift.",
+        "", "### 👥 Untuk praktisi/pengambil keputusan",
+        "Gunakan keluaran ML bersama TIME + PERSON + PLACE + OUTCOME serta konteks lapangan. Jika beberapa lapisan menghasilkan sinyal yang searah, sinyal tersebut dapat menjadi dasar untuk **verifikasi terarah**. Otoritas manusia tetap menentukan interpretasi akhir dan tindakan.",
+        "", "### ⚠️ Batasan penting",
+        "Status ERROR berarti evaluasi model belum valid, bukan performa model nol. Validasi eksternal dan monitoring drift diperlukan sebelum penggunaan operasional.",
+        "", "### 🔄 Prinsip continuous intelligence",
         "DATA → ANALYSIS → PREDICTION → RECOMMENDATION → INTERVENTION → OUTCOME → NEW DATA → RE-ANALYSIS → CONTINUOUS LEARNING",
     ]
     return "\n".join(lines)
 
+
 def ai_prediction_expert(result, disease, label):
-    """Executive summary that synthesizes the five downstream analysis views."""
+    """Executive synthesis of epidemiology, temporal, spatial, risk and ML evidence."""
     df = result.get("analysis_dataframe") if isinstance(result, dict) else None
     if not isinstance(df, pd.DataFrame) or df.empty:
-        return "### 🧠 EXECUTIVE SUMMARY — AI PREDICTION & RECOMMENDATION\\n\\nData belum mencukupi."
-
+        return "### 🧠 EXECUTIVE SUMMARY — AI PREDICTION & RECOMMENDATION\n\nData belum mencukupi."
     total = len(df)
     deaths = int(_death_series(df).sum())
     cfr = _pct(deaths, total)
     profile = result.get("disease_intelligence", {})
-    family = profile.get("family", "UNKNOWN") if isinstance(profile, dict) else "UNKNOWN"
-
+    family = str(profile.get("family", "UNKNOWN")).upper() if isinstance(profile, dict) else "UNKNOWN"
     lines = [
-        "### 🧠 EXECUTIVE SUMMARY — AI PREDICTION & RECOMMENDATION",
-        "",
-        f"**Scope:** {label} | **Penyakit:** {disease} | **Family:** {family} | "
-        f"**Kasus:** {total:,} | **Meninggal:** {deaths:,} | **CFR:** {cfr:.2f}%.",
-        "",
-        "Ringkasan ini merupakan **sintesis hasil lima lapisan analisis SI-HIS**. "
-        "Tujuannya membantu eksekutif melihat situasi, sinyal utama, implikasi, dan tindakan "
-        "yang perlu diverifikasi tanpa harus membaca seluruh tabel analitik.",
+        "### 🧠 EXECUTIVE SUMMARY — AI PREDICTION & RECOMMENDATION", "",
+        f"**Scope:** {label} | **Penyakit:** {disease} | **Family:** {family} | **Kasus:** {total:,} | **Meninggal:** {deaths:,} | **CFR:** {cfr:.2f}%.", "",
+        "Executive summary ini menggabungkan lima lapisan: **Trias Epidemiologi, TIME/Forecast, PLACE/DBSCAN, faktor risiko, dan Machine Learning**. Tujuannya merangkum sinyal yang konsisten, sinyal yang belum pasti, dan verifikasi yang diperlukan.",
     ]
-
-    # 1. Trias Epidemiologi
-    epi = epidemiology_expert(result, label, disease)
-    lines += ["", "### 1️⃣ Trias Epidemiologi — TIME + PERSON + PLACE + OUTCOME"]
-    epi_lines = [x for x in epi.splitlines() if x.strip() and not x.startswith("#")]
-    lines.extend(epi_lines[:5] if epi_lines else ["Belum ada ringkasan trias yang dapat ditampilkan."])
-
-    # 2. Temporal / forecast
-    curve = curve_expert(result, disease)
-    lines += ["", "### 2️⃣ Kurva Epidemik & Prediksi"]
-    curve_lines = [x for x in curve.splitlines() if x.strip() and not x.startswith("#")]
-    lines.extend(curve_lines[:5] if curve_lines else ["Belum ada hasil temporal/forecast yang dapat diringkas."])
-
-    # 3. Spatial
-    spatial = result.get("spatial")
-    spatial_text = spatial_expert(spatial, disease)
-    lines += ["", "### 3️⃣ Peta Spasial & AI DBSCAN"]
-    spatial_lines = [x for x in spatial_text.splitlines() if x.strip() and not x.startswith("#")]
-    lines.extend(spatial_lines[:4] if spatial_lines else ["Data spasial belum mencukupi."])
-
-    # 4. Risk factors
-    risk_text = risk_expert(result)
-    lines += ["", "### 4️⃣ Analisis Faktor Risiko"]
-    risk_lines = [x for x in risk_text.splitlines() if x.strip() and not x.startswith("#")]
-    lines.extend(risk_lines[:5] if risk_lines else ["Belum ada hasil faktor risiko yang dapat diringkas."])
-
-    # 5. ML
-    ml_text = ml_expert(result.get("ml"), disease, label)
-    lines += ["", "### 5️⃣ Analisis Machine Learning"]
-    ml_lines = [x for x in ml_text.splitlines() if x.strip() and not x.startswith("#")]
-    lines.extend(ml_lines[:5] if ml_lines else ["ML layer belum diaktifkan atau belum menghasilkan output."])
-
-    # Recommendation layer
+    epi_lines = [x for x in epidemiology_expert(result, label, disease).splitlines() if x.strip() and not x.startswith("#")]
+    lines += ["", "### 1️⃣ Situasi Epidemiologis"] + (epi_lines[:4] or ["Belum ada ringkasan trias yang dapat ditampilkan."])
+    curve_lines = [x for x in curve_expert(result, disease).splitlines() if x.strip() and not x.startswith("#")]
+    lines += ["", "### 2️⃣ Sinyal TIME & Forecast"] + (curve_lines[1:5] if len(curve_lines) > 1 else ["Hasil temporal/forecast belum mencukupi."])
+    spatial_lines = [x for x in spatial_expert(result.get("spatial"), disease).splitlines() if x.strip() and not x.startswith("#")]
+    lines += ["", "### 3️⃣ Sinyal PLACE & Spatial"] + (spatial_lines[:3] or ["Data spasial belum mencukupi."])
+    risk_lines = [x for x in risk_expert(result).splitlines() if x.strip() and not x.startswith("#")]
+    lines += ["", "### 4️⃣ Sinyal Faktor Risiko & Outcome"] + (risk_lines[:4] or ["Analisis faktor risiko belum menghasilkan ringkasan."])
+    ml_lines = [x for x in ml_expert(result.get("ml"), disease, label).splitlines() if x.strip() and not x.startswith("#")]
+    lines += ["", "### 5️⃣ Sinyal Machine Learning"] + (ml_lines[:4] or ["ML layer belum menghasilkan output."])
     recommendations = result.get("recommendations", result.get("recommendation"))
-    lines += [
-        "",
-        "### 🎯 Executive Interpretation",
-        "AI Prediction & Recommendation tidak menggantikan lima analisis di bawahnya. "
-        "Lapisan ini menggabungkan bukti **TIME + PERSON + PLACE + OUTCOME + risk factors + ML** "
-        "untuk membantu menentukan apa yang perlu diperiksa lebih dahulu.",
-    ]
+    lines += ["", "### 🎯 Executive Interpretation & Recommendation", f"Untuk **{disease} ({family})**, gunakan lima lapisan di atas untuk mencari **konvergensi sinyal**. Sinyal yang muncul konsisten pada TIME, PLACE, PERSON/risiko, outcome, dan/atau ML memiliki nilai lebih besar untuk diverifikasi daripada satu indikator tunggal; ini tetap bukan bukti kausalitas."]
     if recommendations:
         if isinstance(recommendations, (list, tuple)):
             recs = [str(x) for x in recommendations[:5]]
@@ -557,21 +490,16 @@ def ai_prediction_expert(result, disease, label):
             recs = [f"{k}: {v}" for k, v in list(recommendations.items())[:5]]
         else:
             recs = [str(recommendations)]
-        lines.append("**Rekomendasi sistem:** " + " ".join(recs))
+        lines.append("**Rekomendasi yang tersedia dari engine:** " + " ".join(recs))
     else:
-        lines.append(
-            "**Rekomendasi umum:** verifikasi perubahan temporal, distribusi Person–Place, "
-            "cluster spasial, faktor risiko, dan keluaran ML; lakukan konfirmasi lapangan "
-            "sebelum intervensi operasional."
-        )
-
-    lines += [
-        "",
-        "### ⚠️ Catatan Eksekutif",
-        "Hasil AI adalah **decision support**, bukan diagnosis, penetapan KLB legal, atau "
-        "perintah intervensi otomatis. Sinyal harus dikonfirmasi dengan kualitas data, "
-        "definisi kasus, denominator, ketidakpastian statistik, dan investigasi lapangan.",
-    ]
+        if family == "MENULAR":
+            action = "verifikasi definisi kasus, perubahan temporal, distribusi Person–Place, sinyal spasial, dan konteks transmisi sebelum investigasi lapangan."
+        elif family == "PTM":
+            action = "verifikasi tren, denominator populasi, faktor risiko, outcome, dan stabilitas model sebelum menarik kesimpulan operasional."
+        else:
+            action = "verifikasi kualitas data, klasifikasi penyakit/event, pola waktu-tempat-orang, dan hasil model sebelum tindakan."
+        lines.append(f"**Langkah verifikasi yang disarankan:** {action}")
+    lines += ["", "### ⚠️ Catatan Eksekutif", "Hasil AI adalah **decision support**, bukan diagnosis, penetapan KLB legal, atau perintah intervensi otomatis. Interpretasi akhir memerlukan kualitas data, definisi kasus/outcome, denominator yang sesuai, ketidakpastian statistik, validasi model, dan investigasi lapangan."]
     return "\n".join(lines)
 
 def vulnerable_expert(v):

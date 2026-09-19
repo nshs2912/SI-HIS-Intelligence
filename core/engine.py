@@ -178,8 +178,8 @@ class IntelligenceEngine:
         elif prepared.scope.district:geographic_level="Kabupaten"
         elif prepared.scope.province:geographic_level="Provinsi"
         else:geographic_level="Indonesia"
-        eligibility=validate_scope_for_special_analysis(work,disease,geographic_level,10,14);profile=resolve_disease_profile(disease);disease_intel=classify_disease(disease);infectious_intel=build_infectious_intelligence(work,disease);acute_event_enabled=(disease_intel.family=='UNKNOWN' or disease_intel.subgroup in {'direct/indirect'});acute_event_intel=poisoning_vs_disaster_signal(work) if acute_event_enabled else {'enabled':False,'reason':f'Acute Event / Keracunan Intelligence tidak relevan untuk profil {disease_intel.subgroup}.'};toxicology_intel=toxicology_differential(work) if acute_event_enabled else {'enabled':False,'reason':f'Toxicology Intelligence tidak relevan untuk profil {disease_intel.subgroup}.'}
-        incident_v2=incident_reasoning_v2(work)
+        eligibility=validate_scope_for_special_analysis(work,disease,geographic_level,10,14);profile=resolve_disease_profile(disease);disease_intel=classify_disease(disease);infectious_intel=build_infectious_intelligence(work,disease);acute_event_enabled=(disease_intel.family=='UNKNOWN');acute_event_intel=poisoning_vs_disaster_signal(work) if acute_event_enabled else {'enabled':False,'reason':f'Acute Event / Keracunan Intelligence tidak relevan untuk profil {disease_intel.subgroup}.'};toxicology_intel=toxicology_differential(work) if acute_event_enabled else {'enabled':False,'reason':f'Toxicology Intelligence tidak relevan untuk profil {disease_intel.subgroup}.'}
+        incident_v2=incident_reasoning_v2(work) if disease_intel.family=='MENULAR' else {'enabled':False,'reason':f'Incident & Outbreak Reasoning tidak relevan untuk {disease_intel.family}.'}
         # For communicable diseases, onset is the epidemiological clock when it is available.
         # The original service/examination date is preserved for data-quality review.
         if disease_intel.family=="MENULAR" and "Tanggal Onset" in work.columns:
@@ -214,7 +214,8 @@ class IntelligenceEngine:
             return copy.deepcopy(cached)
 
         profile=classify_disease(disease)
-        acute_event_enabled=(profile.family=='UNKNOWN' or profile.subgroup in {'direct/indirect'})
+        acute_event_enabled=(profile.family=='UNKNOWN')
+        infectious_enabled=(profile.family=='MENULAR')
         daily=analyze_trias(df)["time"]
         anomaly=temporal_anomaly_detection(df)
         changes=temporal_change_points(df)
@@ -226,8 +227,8 @@ class IntelligenceEngine:
         disease_growth=disease_specific_growth_model(df)
         continuous=prioritize_continuous_signals(anomaly,changes,growth,neighbor)
         severity=train_case_severity(df)
-        klb=train_klb_prediction(df)
-        spatial=train_spatial_outbreak(df)
+        klb=train_klb_prediction(df) if infectious_enabled else {"enabled":False,"reason":"KLB/outbreak prediction hanya dijalankan untuk penyakit menular."}
+        spatial=train_spatial_outbreak(df) if infectious_enabled else {"enabled":False,"reason":"Spatial outbreak prediction hanya dijalankan untuk penyakit menular."}
         vulnerable=train_vulnerable_population(df)
         forecast=robust_forecast(daily,14)
         result={

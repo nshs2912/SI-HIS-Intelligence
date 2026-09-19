@@ -1064,8 +1064,7 @@ else:
     if not result.get('eligible',False):st.warning('Analisis epidemiologi belum dapat dijalankan.');render_value(result.get('eligibility'));st.stop()
     total=int(result['overview']['total_cases']);mortality=result.get('mortality');deaths=int(mortality.get('deaths',mortality.get('meninggal',0)) or 0) if isinstance(mortality,dict) else 0;cfr=deaths/total*100 if total else 0;a,b,c=st.columns(3);a.metric(f'Total {sel_disease}',f'{total:,}');b.metric('Meninggal',f'{deaths:,}');c.metric('CFR — tingkat kematian akibat penyakit',f'{cfr:.2f}%')
     # Navigation Bar utama tetap horizontal di atas. Setiap tab memiliki resume sendiri tepat di bawah tab.
-    tab_labels=['🚨 AI Prediction & Recommendation','📊 Trias Epidemiologi (Detail)','📈 Kurva Epidemik & Prediksi','🗺️ Peta Spasial & AI DBSCAN','🧪 Analisis Faktor Risiko']
-    if not vector_borne: tab_labels.append('🤖 Analisis ML')
+    tab_labels=['🚨 AI Prediction & Recommendation','📊 Trias Epidemiologi (Detail)','📈 Kurva Epidemik & Prediksi','🗺️ Peta Spasial & AI DBSCAN','🧪 Analisis Faktor Risiko','🤖 Analisis ML']
     tabs=st.tabs(tab_labels)
     with tabs[0]:
         st.markdown('### 🚨 AI Prediction & Recommendation')
@@ -1155,8 +1154,7 @@ else:
             for outcome_name,outcome in outcomes.items():
                 with st.expander(f'Outcome: {outcome_name}',expanded=(outcome_name=='Penyakit')):render_value(outcome)
         render_risk_factors(result.get('risk_factors'))
-    if not vector_borne:
-        with tabs[5]:
+    with tabs[5]:
             st.markdown('### 🤖 Analisis ML')
             orch=result.get('intelligence_orchestration',{})
             incident=result.get('incident_reasoning_v2',{})
@@ -1165,7 +1163,7 @@ else:
                 str(disease_profile.get('family','')).upper() in {'MENULAR','PTM'}
                 and str(disease_profile.get('transmission','')).lower() not in {'','unknown','mixed'}
             )
-            if isinstance(incident,dict) and not disease_context_known:
+            if isinstance(incident,dict) and incident.get('enabled',True) and not disease_context_known:
                 st.markdown('### 🚨 Incident & Outbreak Reasoning v2')
                 st.caption('Menggabungkan temporal burst, spatio-temporal cluster, sindrom gejala, attack rate, facility surge, severity/mortality burst, exposure, dan corroboration lingkungan. Skor adalah triage internal.')
                 ic1,ic2,ic3=st.columns(3)

@@ -9,7 +9,7 @@ from typing import Any
 
 import pandas as pd
 
-from core.analytics import generate_data_simulasi
+from core.data_provider import get_cases, get_source_descriptor
 from core.scope import QueryScope, apply_scope, scope_label
 
 
@@ -24,6 +24,7 @@ def _risk_level(score: float) -> str:
 def build_kemenkes_intelligence(
     period_days: int = 14,
     scope: dict[str, Any] | None = None,
+    source_id: str = "dummy",
 ) -> dict[str, Any]:
     """Build Kemenkes intelligence for one isolated read/query scope."""
     raw = scope or {}
@@ -37,7 +38,8 @@ def build_kemenkes_intelligence(
         period_days=period_days,
     ).normalized()
 
-    df = generate_data_simulasi().copy(deep=True)
+    descriptor = get_source_descriptor(source_id)
+    df = get_cases(source_id=source_id).copy(deep=True)
     df["Tanggal Sakit"] = pd.to_datetime(df["Tanggal Sakit"], errors="coerce")
     df = df.dropna(subset=["Tanggal Sakit"])
     df = apply_scope(df, query_scope)
@@ -129,8 +131,9 @@ def build_kemenkes_intelligence(
             "Evaluasi kesiapan logistik pada wilayah dengan sinyal risiko meningkat.",
         ],
         "data_provenance": {
-            "source": "SI-HIS canonical data provider",
-            "dataset_type": "synthetic_national",
+            "source": descriptor.label,
+            "source_id": source_id,
+            "dataset_type": "synthetic_national" if source_id == "dummy" else "factual",
             "engine": "SI-HIS Intelligence",
             "query_scope": query_scope.to_dict(),
             "scope_isolated": True,
@@ -155,7 +158,8 @@ def _empty_response(scope: QueryScope, label: str) -> dict[str, Any]:
         "recommendations": [],
         "data_provenance": {
             "source": "SI-HIS canonical data provider",
-            "dataset_type": "synthetic_national",
+            "source_id": "unknown",
+            "dataset_type": "unknown",
             "engine": "SI-HIS Intelligence",
             "query_scope": scope.to_dict(),
             "scope_isolated": True,
